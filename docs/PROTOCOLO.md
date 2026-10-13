@@ -206,7 +206,8 @@ Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el det
 |---|---|---|
 | host → relay | `host.hello` | `{ machineId, hostname, roots:["/home/u/proyectos"], backends:{ herdr:"0.9.3"|null, tmux:"3.4"|null, wt:true|false, console:true|false }, defaultBackend:"herdr", launchers:["gentle-shell","pi"], defaultLauncher:"gentle-shell" }` |
 | app → relay → host | `host.list_dirs` | `{ machineId, path }` → `host.dirs { path, dirs:[nombre…] }` (sólo dentro de `roots`) |
-| app → relay → host | `host.spawn` | `{ machineId, cwd, name?, launcher?, backend?: "herdr"|"tmux"|"wt"|"console", initialPrompt? }` → `host.spawned { spawnId, backend, herdr:{workspaceId,paneId}|null, tmuxSession|null }` o `error` |
+| app → relay → host | `host.herdr_layout` | `{ machineId }` → `host.herdr_layout.result { workspaces:[{id,label,cwd,tabs:[{id,label,panes:[{id,agent?}]}]}] }` |
+| app → relay → host | `host.spawn` | `{ machineId, cwd, name?, launcher?, backend?: "herdr"|"tmux"|"wt"|"console", herdrTarget?: {type:"workspace"} | {type:"tab", workspaceId} | {type:"split", paneId, direction:"right"|"down"}, initialPrompt? }` → `host.spawned { spawnId, backend, herdr:{workspaceId,paneId}|null, tmuxSession|null }` o `error` |
 | app → relay → host | `host.kill` | `{ machineId, spawnId }` (sólo agentes creados por el host) |
 | relay → app | `hosts.update` | `{ upsert:[{machineId, hostname, roots, online}], remove:[machineId] }` |
 
