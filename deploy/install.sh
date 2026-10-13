@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
     --from) FROM="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --caddy) CADDY=1; shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
     *) die "opción desconocida: $1" ;;
   esac
 done
@@ -73,7 +73,10 @@ else
   npm install -g "@j3pf/rp-relay@${VERSION}"
 fi
 command -v rp-relay >/dev/null || die "rp-relay no quedó en el PATH"
-[[ "$(command -v rp-relay)" == "/usr/bin/rp-relay" ]] || echo "aviso: rp-relay está en $(command -v rp-relay); ajusta ExecStart en el servicio"
+RP_BIN="$(command -v rp-relay)"
+if [[ "$RP_BIN" != "/usr/bin/rp-relay" ]]; then
+  ln -sf "$RP_BIN" /usr/bin/rp-relay 2>/dev/null || echo "aviso: rp-relay está en $RP_BIN; ajusta ExecStart en el servicio si no existe /usr/bin/rp-relay"
+fi
 
 # 4. Configuración y base de datos
 if [[ ! -f /etc/rp-relay/config.json ]]; then
