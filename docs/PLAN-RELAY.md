@@ -10,7 +10,7 @@ Ver contexto en [ARQUITECTURA.md](ARQUITECTURA.md), [COMPATIBILIDAD.md](COMPATIB
 3. Enrutar en tiempo real: eventos agente → apps; mensajes/abort/respuestas app → agente.
 4. Persistir **historial** (eventos finales) para que la app vea lo ocurrido mientras estaba cerrada.
 5. Gestionar el ciclo de vida de **prompts** (preguntas/autorizaciones) con semántica "primera respuesta gana".
-6. Enviar **push FCM** cifrado y retirarlo cuando la pregunta se resuelve.
+6. Enviar **push por dos canales** —**directo** (WS de la app en segundo plano, sin Google) y **FCM opcional**— y retirarlo cuando la pregunta se resuelve. Ver [RESILIENCIA.md](RESILIENCIA.md).
 7. Almacén temporal de **adjuntos** (blobs).
 8. CLI de administración.
 
@@ -26,7 +26,9 @@ Ver contexto en [ARQUITECTURA.md](ARQUITECTURA.md), [COMPATIBILIDAD.md](COMPATIB
 | WebSocket | `ws` 8 (montado en el server de Fastify vía `@fastify/websocket`) |
 | Esquemas | `typebox` + `@fastify/type-provider-typebox`; validación con `typebox/compiler` (`TypeCompiler`) |
 | DB | SQLite vía `better-sqlite3` (modo WAL), migraciones SQL numeradas propias (`migrations/0001_init.sql`…) |
-| Push | `firebase-admin` (FCM HTTP v1) |
+| Push | Canal directo propio (WS) + `firebase-admin` (FCM HTTP v1) **opcional** |
+| TLS | Integrado opcional (`acme-client` para Let's Encrypt, o archivos `cert/key`); Caddy opcional delante |
+| Backups | `VACUUM INTO` programado (horario, 7 días) + Litestream opcional |
 | Cripto | `node:crypto` (randomBytes, SHA‑256, AES‑256‑GCM) |
 | IDs | `ulid` |
 | Logs | `pino` (JSON → journald) |
@@ -50,7 +52,7 @@ rp-relay/
 │   ├── auth/{tokens.ts,pairing.ts,middleware.ts}
 │   ├── ws/{agentGateway.ts,appGateway.ts,hub.ts}   # hub = registro en memoria de conexiones
 │   ├── domain/{agents.ts,events.ts,prompts.ts,messages.ts}
-│   ├── push/{fcm.ts,crypto.ts,dispatcher.ts}
+│   ├── push/{direct.ts,fcm.ts,crypto.ts,dispatcher.ts}
 │   ├── blobs/{store.ts,routes.ts,gc.ts}
 │   ├── http/{routes/*.ts}
 │   └── cli/{index.ts,init.ts,pair.ts,devices.ts,machines.ts,doctor.ts}
@@ -152,6 +154,9 @@ error `agent_timeout`).
 - Después, el agente queda suscrito en vivo (incluye `message_delta` no persistidos).
 
 ### 5.5 Push dispatcher
+- Canales por dispositivo: `direct` (si tiene una conexión `mode=direct` viva) y `fcm` (si hay token y `config.fcm`).
+  Se envía por **todos** los activos con el mismo `pushId`; la app deduplica. Si no hay ninguno vivo, el push queda
+  pendiente y se entrega en cuanto el dispositivo se reconecta (prompts abiertos siempre se re-sincronizan).
 - Selecciona dispositivos no revocados con `fcm_token` y cuyas `notify_prefs` permitan la categoría **para esa PC**
   (`prefs.machines[machineId]` sobrescribe a `prefs.categories`; PC silenciada o en horas silenciosas → no se envía,
   salvo `danger=high` si el usuario activó "autorizaciones críticas siempre"). Por defecto: `permission` y `question`
@@ -161,7 +166,7 @@ error `agent_timeout`).
 - Cifra cuerpo con `pushKey` del dispositivo (AES‑256‑GCM, nonce 12 B aleatorio, AAD `"rp1"`).
 - `messaging.send({ token, data, android: { priority, ttl, collapseKey } })`.
 - Error `messaging/registration-token-not-registered` → borrar `fcm_token`.
-- Sin `config.fcm` → dispatcher no‑op (log de advertencia una vez).
+- Sin `config.fcm` → sólo canal directo (funcionamiento completo, sin Google).
 
 ## 6. Configuración
 
@@ -207,7 +212,7 @@ sudo cp deploy/rp-relay.service /etc/systemd/system/ && sudo systemctl enable --
 # 4. TLS con Caddy
 sudo apt install -y caddy && sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
-`deploy/rp-relay.service`: `User=rp-relay`, `ExecStart=/usr/bin/rp-relay serve`, `Restart=always`,
+`deploy/rp-relay.service`: `Type=notify`, `WatchdogSec=30` (el relay hace `sd_notify WATCHDOG=1` cada 10 s), `User=rp-relay`, `ExecStart=/usr/bin/rp-relay serve`, `Restart=always`,
 `NoNewPrivileges=yes`, `ProtectSystem=strict`, `ReadWritePaths=/var/lib/rp-relay`, `PrivateTmp=yes`.
 
 `deploy/Caddyfile`:
@@ -218,6 +223,10 @@ relay.midominio.com {
 ```
 Requisitos: DNS A/AAAA apuntando al servidor, puertos 80/443 abiertos (`ufw allow 80,443/tcp`).
 
+### Opción A2 — sin Caddy
+`"tls": { "acme": { "domain": "relay.midominio.com", "email": "…" } }` (el relay escucha en 443/80 con
+`AmbientCapabilities=CAP_NET_BIND_SERVICE`) o `"tls": { "cert": "/ruta/fullchain.pem", "key": "/ruta/privkey.pem" }`.
+
 ### Opción B — Docker Compose
 `deploy/docker-compose.yml` con servicios `relay` (volumen `/var/lib/rp-relay`) y `caddy` (volúmenes de datos).
 
@@ -225,7 +234,7 @@ Requisitos: DNS A/AAAA apuntando al servidor, puertos 80/443 abiertos (`ufw allo
 `publicUrl = https://<host>.<tailnet>.ts.net`, TLS con `tailscale cert` o `tailscale serve --bg 8787`.
 El teléfono necesita Tailscale activo. FCM sigue funcionando (sale por Google).
 
-## 9. Configurar Firebase (una vez)
+## 9. Configurar Firebase (una vez, **opcional**: sólo mejora la batería del teléfono)
 
 1. https://console.firebase.google.com → *Add project* (sin Analytics).
 2. *Add app* → Android → package `dev.j3pf.rp` (debe coincidir con `applicationId` de la app) → descargar
@@ -236,7 +245,10 @@ El teléfono necesita Tailscale activo. FCM sigue funcionando (sale por Google).
 
 ## 10. Observabilidad y operación
 - `/healthz`; logs pino con `agentId`, `promptId`; nunca loguear contenido de mensajes (sólo tamaños) salvo `LOG_LEVEL=trace`.
-- Backup: `sqlite3 /var/lib/rp-relay/rp.db ".backup /backups/rp-$(date +%F).db"` por cron diario.
+- Backup integrado: `VACUUM INTO /var/lib/rp-relay/backups/rp-<fecha-hora>.db` cada hora, retención 7 días;
+  `rp-relay backup now`, `rp-relay restore <archivo>` (verifica `PRAGMA integrity_check`). Litestream opcional para
+  réplica continua a otro disco o servidor SFTP.
+- Cierre ordenado en `SIGTERM`: deja de aceptar, envía `1012` a todos, vacía escrituras, cierra DB.
 - Actualización: `npm i -g @j3pf/rp-relay@latest && systemctl restart rp-relay` (migraciones automáticas al arrancar).
 
 ## 11. Tests
@@ -269,3 +281,6 @@ CI (GitHub Actions): lint, typecheck, test, build Docker, publicar `@j3pf/rp-pro
 | R11 | `/ws/host` + enrutamiento `host.*` (PROTOCOLO §9) | 3 | 1 d |
 | R12 | PCs: contexto/color/horas silenciosas, `PATCH`, prefs por PC en dispatcher, `machines.update` | 1–2 | 1 d |
 | R13 | Transporte long-poll para plugins tras proxy corporativo | 2 | 1 d |
+| R14 | Canal de push directo (`mode=direct`, `push.notify/ack`, pendientes) | 2 | 1,5 d |
+| R15 | Idempotencia `clientMsgId`, `1012`, watchdog systemd, backups/restore, TLS integrado | 2–3 | 2 d |
+| R16 | Pruebas de resiliencia y carga (RESILIENCIA §3.4 y §4) | 3 | 2 d |

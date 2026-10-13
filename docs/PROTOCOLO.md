@@ -12,12 +12,13 @@ de `rp-relay/packages/protocol/fixtures/*.json` (tests de contrato en los tres r
 | Canal | URL | Quién | Auth |
 |---|---|---|---|
 | WS agentes | `wss://<relay>/ws/agent` | plugin | Header `Authorization: Bearer <machineToken>` |
-| WS apps | `wss://<relay>/ws/app` | app | Header `Authorization: Bearer <deviceToken>` |
+| WS apps | `wss://<relay>/ws/app` | app | Header `Authorization: Bearer <deviceToken>`; query `?mode=foreground|direct` (`direct` = conexión del servicio en segundo plano: sólo recibe `push.*`, `prompt.*`, `agents.update` resumido) |
 | HTTP | `https://<relay>/v1/...` | ambos | `Authorization: Bearer <token>` |
 
 - Frames de texto, **un objeto JSON por frame**, UTF‑8, máx. **1 MiB** (los adjuntos van por HTTP, no por WS).
 - Keep‑alive: el relay envía ping WS cada 25 s; si no hay pong en 10 s cierra. Los clientes reconectan con
   backoff exponencial 1 s → 2 → 4 … máx. 30 s, con jitter ±20 %.
+- Código estándar `1012` (service restart) al actualizar el relay: reconectar de inmediato.
 - Códigos de cierre propios: `4001` token inválido/revocado (no reconectar), `4002` versión de protocolo
   incompatible (no reconectar), `4003` reemplazado por otra conexión del mismo agente, `4008` frame inválido.
 
@@ -54,7 +55,7 @@ Códigos: `bad_request`, `unauthorized`, `not_found`, `conflict` (p. ej. prompt 
 
 ### `agent.hello` (primer mensaje obligatorio, espera `agent.welcome`)
 ```jsonc
-{ "agentId":"…", "instance":"…", "epoch":"…",
+{ "agentId":"…", "kind":"pi", "instance":"…", "epoch":"…",   // kind: tipo de agente (hoy sólo "pi"; extensible)
   "pi": { "version":"1.2.0", "mode":"tui" },        // ctx.mode
   "plugin": { "version":"0.1.0", "features":["mirror_ui","adapters:gentle-ask","gate","rp_ask_user","attachments","deliver_terminal"] },
   "session": { "id":"…", "file":"/home/u/.pi/agent/sessions/…jsonl", "name":"refactor auth" },
@@ -119,7 +120,7 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 ```
 ### `prompt.resolved` — `{ "promptId":"…", "by":"local"|"remote"|"timeout"|"cancelled", "answer": Answer|null }`
 ### `prompt.ack` — `{ "promptId":"…", "accepted": true }` (respuesta a `prompt.answer`; `false` si ya estaba resuelto/no existe)
-### `user.message.ack` — `{ "clientMsgId":"…", "disposition":"sent"|"queued_steer"|"queued_followup"|"typed"|"command"|"rejected", "error":null|"agent_blocked"|"herdr_unavailable" }`
+### `user.message.ack` — `{ "clientMsgId":"…", "disposition":"sent"|"queued_steer"|"queued_followup"|"typed"|"typed_after_dialog"|"command"|"duplicate"|"rejected", "method":"api"|"interactive"|"herdr", "error":null|"agent_blocked"|"herdr_unavailable"|"interactive_unavailable" }`
 
 ## 5. Relay → Plugin
 
@@ -127,7 +128,7 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 |---|---|
 | `agent.welcome` | `{ "serverTime":…, "lastSeq":56 | null, "pendingAnswers":[prompt.answer…] }` (si `lastSeq` del mismo `epoch` < actual, el plugin no necesita reenviar; el snapshot se manda siempre) |
 | `agent.resync` | `{}` → el plugin envía `agent.snapshot` |
-| `user.message` | `{ "clientMsgId":"…", "deviceId":"…", "text":"…", "attachments":[{"blobId","name","mime","size"}], "delivery":"auto"|"steer"|"followUp"|"terminal", "asCommand": false }` (`terminal` = vía herdr como tecleado; `asCommand` = texto `/…` ejecutado como comando de Pi) |
+| `user.message` | `{ "clientMsgId":"…", "deviceId":"…", "text":"…", "attachments":[{"blobId","name","mime","size"}], "delivery":"auto"|"steer"|"followUp", "method":"auto"|"api"|"interactive"|"herdr", "asCommand": false }` (`interactive` = el plugin lo teclea dentro del proceso de Pi → `source:"interactive"`; `herdr` = vía `herdr agent prompt`; `api` = `sendUserMessage`; `auto` = interactive si gentle está en AUTO, si no api — ver RESILIENCIA §2; `asCommand` = texto `/…` ejecutado como comando). `clientMsgId` es clave de idempotencia (el relay y el plugin descartan repetidos) |
 | `agent.abort` | `{}` → `ctx.abort()` |
 | `prompt.answer` | `{ "promptId":"…", "answer": Answer, "deviceId":"…" }` |
 | `prompt.cancel` | `{ "promptId":"…" }` (expirado por el relay) |
@@ -163,7 +164,7 @@ Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`
 | `POST` | `/v1/pair/device` | código | `{ code, name, fcmToken? }` → `{ deviceId, deviceToken, pushKey (base64 32 B), relayName }` |
 | `POST` | `/v1/pair/machine` | código | `{ code, hostname, name?, context? }` → `{ machineId, machineToken }` |
 | `POST` | `/v1/pair/codes` | device | crear código para emparejar una máquina desde la app → `{ code, expiresAt }` |
-| `PUT` | `/v1/devices/me/push` | device | `{ fcmToken }` (onNewToken) |
+| `PUT` | `/v1/devices/me/push` | device | `{ fcmToken?: string|null, direct: boolean }` — canales de push activos del dispositivo (FCM opcional; `direct` = servicio en primer plano con WS) |
 | `POST` | `/v1/devices/me/push-test` | device | envía una notificación de prueba a este dispositivo |
 | `GET` | `/v1/devices` / `DELETE /v1/devices/{id}` | device | listar / revocar |
 | `GET` | `/v1/machines` / `DELETE /v1/machines/{id}` | device | listar / revocar |
@@ -178,7 +179,13 @@ Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`
 | `GET` | `/v1/blobs/{id}` | machine/device | descarga (TTL 7 días) |
 | `GET` | `/healthz` | — | `{ ok, version, uptime }` |
 
-## 8. Push (FCM)
+## 8. Push
+
+Canales: **directo** (WS `mode=direct`, mensaje `push.notify { k, body }` con el mismo cuerpo descifrado que abajo, sin
+cifrado adicional porque ya va por TLS a tu relay; la app responde `push.ack {pushId}`) y **FCM** (opcional, abajo).
+El relay envía por todos los canales activos; la app deduplica por `promptId`/`pushId`.
+
+### 8.1 FCM (opcional)
 
 Mensaje **data-only**, `android.priority = "high"` para `prompt` y `"normal"` para el resto, `ttl` 1 h (prompt) / 10 min.
 `collapse_key` = `promptId` / `agentId`.
@@ -197,11 +204,13 @@ Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el det
 
 | Dirección | Tipo | Cuerpo |
 |---|---|---|
-| host → relay | `host.hello` | `{ machineId, hostname, roots:["/home/u/proyectos"], backends:{ herdr:"0.9.3"|null, tmux:"3.4"|null }, defaultBackend:"herdr", launchers:["gentle-shell","pi"], defaultLauncher:"gentle-shell" }` |
+| host → relay | `host.hello` | `{ machineId, hostname, roots:["/home/u/proyectos"], backends:{ herdr:"0.9.3"|null, tmux:"3.4"|null, wt:true|false, console:true|false }, defaultBackend:"herdr", launchers:["gentle-shell","pi"], defaultLauncher:"gentle-shell" }` |
 | app → relay → host | `host.list_dirs` | `{ machineId, path }` → `host.dirs { path, dirs:[nombre…] }` (sólo dentro de `roots`) |
-| app → relay → host | `host.spawn` | `{ machineId, cwd, name?, launcher?, backend?, initialPrompt? }` → `host.spawned { spawnId, backend, herdr:{workspaceId,paneId}|null, tmuxSession|null }` o `error` |
+| app → relay → host | `host.spawn` | `{ machineId, cwd, name?, launcher?, backend?: "herdr"|"tmux"|"wt"|"console", initialPrompt? }` → `host.spawned { spawnId, backend, herdr:{workspaceId,paneId}|null, tmuxSession|null }` o `error` |
 | app → relay → host | `host.kill` | `{ machineId, spawnId }` (sólo agentes creados por el host) |
 | relay → app | `hosts.update` | `{ upsert:[{machineId, hostname, roots, online}], remove:[machineId] }` |
 
 `initialPrompt` lo retiene el relay hasta 60 s y lo entrega como `user.message` al primer `agent.hello` que traiga el mismo `spawnId`: rp-host lanza Pi con la variable de entorno
-`RP_SPAWN_ID=<ulid>` y el plugin la incluye en `agent.hello` como `"spawnId"` (campo opcional).
+`RP_SPAWN_ID=<ulid>` (herdr/tmux) o con el flag `--rp-spawn-id <ulid>` (Windows Terminal/consola, que no pasan
+variables de entorno; el plugin registra ese flag con `pi.registerFlag`) y el plugin lo incluye en `agent.hello` como
+`"spawnId"` (campo opcional).
