@@ -1,0 +1,28 @@
+{
+  "name": "@j3pf/rp-protocol",
+  "version": "0.1.0",
+  "description": "Esquemas TypeBox del protocolo RP v1 (Plugin ⇄ Relay ⇄ App) y fixtures de contrato",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist",
+    "!dist/.tsbuildinfo",
+    "fixtures"
+  ],
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j3pf/rp-relay.git",
+    "directory": "packages/protocol"
+  }
+}

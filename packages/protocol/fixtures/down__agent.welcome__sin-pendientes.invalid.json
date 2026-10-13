@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "t": "agent.welcome",
+  "ts": 1760342400000,
+  "d": {
+    "serverTime": 1,
+    "lastSeq": null
+  }
+}

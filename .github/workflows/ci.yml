@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint · tipos · tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm run typecheck
+      # incluye contrato (fixtures), integración, resiliencia (RESILIENCIA §3.4) y humo de carga
+      - run: npm test
+
+  docker:
+    name: imagen Docker
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: rp-relay:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Arranca y responde /healthz
+        run: |
+          docker run -d --name relay -p 8787:8787 rp-relay:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8787/healthz && break || sleep 1; done
+          curl -fsS localhost:8787/healthz
+          docker stop -t 15 relay
+          docker logs relay | grep "rp-relay detenido"

@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "t": "host.spawn",
+  "ts": 1760342400000,
+  "d": {
+    "machineId": "01JA0000000000000000000001",
+    "cwd": "/home/u/proyectos/api",
+    "name": "api",
+    "launcher": "gentle-shell",
+    "backend": "herdr",
+    "herdrTarget": {
+      "type": "tab",
+      "workspaceId": "w2"
+    },
+    "initialPrompt": "hola"
+  }
+}

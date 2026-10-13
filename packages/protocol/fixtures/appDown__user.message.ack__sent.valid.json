@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "t": "user.message.ack",
+  "ts": 1760342400000,
+  "re": "01JA0000000000000000000M06",
+  "d": {
+    "clientMsgId": "01JA0000000000000000000C01",
+    "disposition": "sent",
+    "method": "api",
+    "error": null
+  }
+}

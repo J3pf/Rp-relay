@@ -1,0 +1,24 @@
+name: Carga y resiliencia (semanal)
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Duración en segundos"
+        default: "300"
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # 50 agentes × 20 ev/s (1 000 ev/s agregados), objetivo p99 < 50 ms (RESILIENCIA §4)
+      - run: npm run test:load -- --agents 50 --rate 20 --duration ${{ inputs.duration || 300 }} --p99 50

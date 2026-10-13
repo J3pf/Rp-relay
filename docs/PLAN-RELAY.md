@@ -265,22 +265,48 @@ CI (GitHub Actions): lint, typecheck, test, build Docker, publicar `@j3pf/rp-pro
 
 ## 12. Tareas (orden de implementación)
 
-| # | Tarea | Fase | Est. |
-|---|---|---|---|
-| R0 | Spike S3: Fastify + ws eco con auth Bearer detrás de Caddy | 0 | 0,5 d |
-| R1 | Monorepo, biome, vitest, CI | 1 | 0,5 d |
-| R2 | `packages/protocol`: esquemas + fixtures de todo PROTOCOLO §2–§8 | 1 | 1,5 d |
-| R3 | DB + migraciones + repos | 1 | 1 d |
-| R4 | Tokens, pairing (device/machine), CLI `init`, `pair`, QR en terminal (`qrcode-terminal`) | 1 | 1,5 d |
-| R5 | Gateway agentes: hello/welcome, snapshot, eventos, persistencia, reconexión | 1 | 2 d |
-| R6 | Gateway apps: hello, agents.update, subscribe/historial, user.message, abort | 1 | 2 d |
-| R7 | Prompts: estado, HTTP answer, WS answer, ack, cancel, expiración por desconexión | 2 | 2 d |
-| R8 | Push: cifrado, FCM, prefs, re‑push, cancel | 2 | 1,5 d |
-| R9 | Blobs: upload/download/GC, límites | 3 | 1 d |
-| R10 | Retención, `doctor`, systemd/Caddy/Docker, install.sh, docs de instalación | 3 | 1,5 d |
-| R11 | `/ws/host` + enrutamiento `host.*` (PROTOCOLO §9) | 3 | 1 d |
-| R12 | PCs: contexto/color/horas silenciosas, `PATCH`, prefs por PC en dispatcher, `machines.update` | 1–2 | 1 d |
-| R13 | Transporte long-poll para plugins tras proxy corporativo | 2 | 1 d |
-| R14 | Canal de push directo (`mode=direct`, `push.notify/ack`, pendientes) | 2 | 1,5 d |
-| R15 | Idempotencia `clientMsgId`, `1012`, watchdog systemd, backups/restore, TLS integrado | 2–3 | 2 d |
-| R16 | Pruebas de resiliencia y carga (RESILIENCIA §3.4 y §4) | 3 | 2 d |
+| # | Tarea | Fase | Est. | Estado |
+|---|---|---|---|---|
+| R0 | Spike S3: Fastify + ws eco con auth Bearer detrás de Caddy | 0 | 0,5 d | ✅ `spikes/s3-echo.ts` + `docs/spikes/S3-ws-eco.md` (falta confirmar Caddy real en el servidor) |
+| R1 | Monorepo, biome, vitest, CI | 1 | 0,5 d | ✅ monorepo npm workspaces, biome, vitest, CI |
+| R2 | `packages/protocol`: esquemas + fixtures de todo PROTOCOLO §2–§8 | 1 | 1,5 d | ✅ `packages/protocol` + 94 fixtures + vector de cifrado |
+| R3 | DB + migraciones + repos | 1 | 1 d | ✅ `migrations/0001_init.sql`, `src/db` |
+| R4 | Tokens, pairing (device/machine), CLI `init`, `pair`, QR en terminal (`qrcode-terminal`) | 1 | 1,5 d | ✅ `src/auth`, CLI `init`/`pair`, QR |
+| R5 | Gateway agentes: hello/welcome, snapshot, eventos, persistencia, reconexión | 1 | 2 d | ✅ `src/ws/agentGateway.ts`, `src/domain/agents.ts` |
+| R6 | Gateway apps: hello, agents.update, subscribe/historial, user.message, abort | 1 | 2 d | ✅ `src/ws/appGateway.ts`, `src/domain/history.ts`/`messages.ts` |
+| R7 | Prompts: estado, HTTP answer, WS answer, ack, cancel, expiración por desconexión | 2 | 2 d | ✅ `src/domain/prompts.ts` |
+| R8 | Push: cifrado, FCM, prefs, re‑push, cancel | 2 | 1,5 d | ✅ `src/push/{crypto,fcm,prefs,dispatcher}.ts` |
+| R9 | Blobs: upload/download/GC, límites | 3 | 1 d | ✅ `src/blobs` |
+| R10 | Retención, `doctor`, systemd/Caddy/Docker, install.sh, docs de instalación | 3 | 1,5 d | ✅ retención, `doctor`, `deploy/*`, `docs/INSTALACION.md` |
+| R11 | `/ws/host` + enrutamiento `host.*` (PROTOCOLO §9) | 3 | 1 d | ✅ `/ws/host`, `src/domain/hosts.ts` |
+| R12 | PCs: contexto/color/horas silenciosas, `PATCH`, prefs por PC en dispatcher, `machines.update` | 1–2 | 1 d | ✅ contexto/color/horas silenciosas, `PATCH`, prefs por PC |
+| R13 | Transporte long-poll para plugins tras proxy corporativo | 2 | 1 d | ✅ `/v1/agent/send|poll` |
+| R14 | Canal de push directo (`mode=direct`, `push.notify/ack`, pendientes) | 2 | 1,5 d | ✅ canal directo + `push_outbox` |
+| R15 | Idempotencia `clientMsgId`, `1012`, watchdog systemd, backups/restore, TLS integrado | 2–3 | 2 d | ✅ idempotencia, `1012`, watchdog, backups/restore, TLS/ACME |
+| R16 | Pruebas de resiliencia y carga (RESILIENCIA §3.4 y §4) | 3 | 2 d | ✅ `test/resilience.test.ts`, `test/load/*` (`npm run test:load`) |
+
+## 13. Notas de implementación (decisiones tomadas al construirlo)
+
+Estado: **implementado** (R0–R16). `npm run check` ejecuta lint, tipos y la batería completa (contrato, integración,
+resiliencia, humo de carga). Diferencias menores respecto al diseño de este documento, todas compatibles:
+
+| Tema | Plan | Implementación |
+|---|---|---|
+| TypeBox | `typebox` + `typebox/compiler` | `@sinclair/typebox` 0.34 (`TypeCompiler`), que es lo que soporta `@fastify/type-provider-typebox` 5 |
+| WebSocket | `@fastify/websocket` | `ws` en modo `noServer` sobre el `http.Server` de Fastify (un único punto de `upgrade`; permite completar el upgrade y cerrar con `4001`) |
+| `sd_notify` | desde el proceso | Node no habla sockets datagrama Unix: se delega en `systemd-notify` (`NotifyAccess=all` en el servicio) |
+| Migraciones "reversibles" | — | copia `VACUUM INTO` previa a aplicar cualquier migración sobre una base con datos; `rp-relay restore` deshace |
+| CLI ⇄ relay en marcha | — | API `/admin/*` en el propio relay (token en `dataDir/admin.token`, rechazada tras proxy) para revocar/editar/`push test` con difusión inmediata; si el relay está parado el CLI opera sobre la DB |
+| Tablas extra | las del §4 | `relay_meta` (relayId), `blob_grants` (una PC sólo descarga adjuntos que se le enrutaron), `push_outbox` (entregas del canal directo hasta `push.ack`) y columnas auxiliares (`direct_enabled`, `pairing_codes.meta`, `agents.kind/gentle_mode/…`) |
+| Prompts `answered` abandonados | — | pasan a `expired` al día; un agente con respuestas/prompts pendientes no se purga |
+| Reapertura | — | si el relay canceló un prompt por la ventana de gracia y el plugin reconecta con ese diálogo aún abierto, se reabre y se vuelve a notificar |
+| Contrapresión | `bufferedAmount > 1 MB` → descartar deltas | además, `> 16 MiB` cierra con `1013` para que la app reconecte y reanude con `sinceSeq` |
+| `host.spawn.initialPrompt` | retenido 60 s | además se admite que el `agent.hello` llegue antes que `host.spawned` |
+
+Cobertura de pruebas: `test/contract` (todos los fixtures de los 6 canales), `pairing`, `gateway`, `prompts` (incluye la
+carrera de dos respuestas HTTP y WS), `push` (vector de cifrado, prefs, horas silenciosas, FCM falso, canal directo),
+`transport` (long-poll), `blobs`, `hosts`, `resilience` (relay muerto con prompt respondido a medias, cortes de red,
+reinicio de Pi en `message_update`, `clientMsgId` repetido, restauración de backup, heartbeat, contrapresión), `unit`
+(config, migraciones, repos, retención, watchdog), `tls`, `cli` (init/pair/gestión/backup/restore/doctor contra relay
+real) y `load-smoke`. Carga completa: `npm run test:load` (50 agentes × 20 ev/s; objetivo p99 < 50 ms).
+

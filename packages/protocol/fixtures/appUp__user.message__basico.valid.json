@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "t": "user.message",
+  "ts": 1760342400000,
+  "id": "01JA0000000000000000000M06",
+  "d": {
+    "clientMsgId": "01JA0000000000000000000C01",
+    "text": "hola",
+    "attachments": [
+      {
+        "blobId": "01JA0000000000000000000B01",
+        "name": "a.png",
+        "mime": "image/png",
+        "size": 10
+      }
+    ],
+    "delivery": "auto",
+    "method": "auto",
+    "asCommand": false,
+    "agentId": "01JA0000000000000000000001:sess-1"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "t": "agent.welcome",
+  "ts": 1760342400000,
+  "d": {
+    "serverTime": 1760342400000,
+    "lastSeq": 56,
+    "pendingAnswers": [
+      {
+        "promptId": "01JA0000000000000000000P01",
+        "answer": {
+          "optionIds": [
+            "0"
+          ]
+        },
+        "deviceId": "01JA0000000000000000000D01"
+      }
+    ]
+  }
+}

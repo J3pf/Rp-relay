@@ -179,6 +179,52 @@ Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`
 | `GET` | `/v1/blobs/{id}` | machine/device | descarga (TTL 7 días) |
 | `GET` | `/healthz` | — | `{ ok, version, uptime }` |
 
+### 7.1 Transporte long-poll (detalle de v1)
+
+Mismos mensajes del §4 (plugin → relay) y §5 (relay → plugin), en lotes JSON:
+
+- `POST /v1/agent/send` — cuerpo: array de sobres (≤200). Un `agent.hello` crea la sesión (o reemplaza la anterior del
+  mismo `agentId`: la antigua recibe `410` en su siguiente `poll`). Respuesta: `{ ok, accepted, rejected }`. **Todo lo
+  que el relay envía al plugin —incluidos `agent.welcome` y los `error` de mensajes inválidos— sale por `poll`**, con
+  `re` = `id` del mensaje original.
+- `POST /v1/agent/poll` con `{ agentId, instance?, timeout? }` (también `GET` con esos parámetros en la query) — espera hasta `timeout` ms (≤25 000) y devuelve
+  `{ messages: [sobres…] }` (vacío al agotar el tiempo). `instance` es opcional pero recomendado: si no coincide con
+  la sesión vigente → `410`.
+- `404` → no hay sesión (enviar `agent.hello` primero). `410 { closeCode }` → la sesión se cerró (`4003` = reemplazada;
+  el plugin no debe reconectar si es `4001`/`4002`). Una sesión sin actividad durante 60 s se da por desconectada
+  (el agente pasa a offline).
+- Autenticación: `Authorization: Bearer <machineToken>`. La PC sólo puede operar agentes cuyo `agentId` empiece por su `machineId`.
+
+### 7.2 Convenciones adicionales de la implementación (compatibles con v1)
+
+Campos y comportamientos añadidos sin cambiar el significado de ninguno existente:
+
+- **Cierre por autenticación:** con token inválido o revocado el relay *completa* el upgrade WS y cierra con `4001`
+  (así el cliente recibe el código); `4008` también para frames binarios, JSON inválido, `hello` ausente en 10 s o
+  inválido (un frame de más de 1 MiB lo corta la librería WS con `1009`); `4002` si `v` no está soportada. Sólo se admiten frames de texto.
+- **Errores HTTP:** `{ "error": { "code", "message", "reason"? } }` con el estado HTTP equivalente
+  (`bad_request` 400, `unauthorized` 401, `not_found` 404, `conflict` 409, `too_large` 413, `rate_limited` 429).
+  `POST /v1/prompts/{id}/answer` devuelve `409 { "ok": false, "reason": "already_resolved", "error": {…} }`.
+- **Códigos de error nuevos:** `agent_timeout` (el plugin no confirmó el `user.message` en 10 s), `host_offline`,
+  `timeout` (el host no respondió).
+- **`agent.welcome`:** `pendingAnswers` son cuerpos de `prompt.answer` (`{ promptId, answer, deviceId }`, sin sobre) y se
+  añade `relayId`. `lastSeq` es el último `seq` **persistido** del mismo `epoch` (null si el epoch cambió).
+- **`app.welcome`:** se añaden `relayId`, `relayName`, `serverTime`. `MachineSummary` lleva `relayId`; `AgentSummary`, `kind`.
+  `lastMessagePreview` puede ser `null` (en el canal `direct` siempre lo es).
+- **`agent.history`:** puede incluir `truncated: true` si el historial no cabía en un frame de 1 MiB (se descartan los
+  más antiguos). `liveFromSeq` es el último `seq` visto del agente.
+- **`user.message` repetido** (mismo `clientMsgId`): el relay no lo reenvía; responde con el `user.message.ack` original.
+- **Push:** el cuerpo de toda notificación incluye `pushId`; `push.notify` es `{ pushId, k, body }` y la app responde
+  `push.ack { pushId }`. `k` admite además `test`. Las entregas del canal directo no acusadas se reenvían al reconectar.
+- **Preferencias:** `PUT /v1/devices/me/prefs` acepta `criticalAlways: boolean` (las autorizaciones `danger=high`
+  ignoran silencio y horas silenciosas) y `GET /v1/devices/me/prefs` las devuelve. Categorías: `permission`, `question`,
+  `settled`, `error`, `terminal_wait`.
+- **Adjuntos:** una PC sólo puede descargar (`GET /v1/blobs/{id}`) los adjuntos referenciados por mensajes que el relay
+  le ha enrutado.
+- **Relay ⇄ CLI:** `/admin/*` (token en `dataDir/admin.token`, sólo sin cabecera `X-Forwarded-For`) no forma parte del contrato.
+- **Fixtures:** `packages/protocol/fixtures/<canal>__<tipo>__<etiqueta>.(valid|invalid).json`, con los canales
+  `up`, `down`, `appUp`, `appDown`, `hostUp`, `hostDown` y `envelope`; `push-vector.json` es el vector de cifrado.
+
 ## 8. Push
 
 Canales: **directo** (WS `mode=direct`, mensaje `push.notify { k, body }` con el mismo cuerpo descifrado que abajo, sin

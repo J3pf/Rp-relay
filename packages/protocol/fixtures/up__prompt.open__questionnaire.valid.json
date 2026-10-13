@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "t": "prompt.open",
+  "ts": 1760342400000,
+  "id": "01JA0000000000000000000M03",
+  "d": {
+    "promptId": "01JA0000000000000000000P02",
+    "agentId": "01JA0000000000000000000001:sess-1",
+    "kind": "questionnaire",
+    "category": "question",
+    "title": "Preguntas",
+    "questions": [
+      {
+        "question": "¿Qué base de datos?",
+        "header": "DB",
+        "multiSelect": false,
+        "allowFreeText": true,
+        "options": [
+          {
+            "id": "0",
+            "label": "SQLite",
+            "description": "archivo",
+            "preview": "sqlite"
+          },
+          {
+            "id": "1",
+            "label": "Postgres"
+          }
+        ]
+      }
+    ],
+    "source": {
+      "extension": "gentle-pi",
+      "tool": "ask_user_question",
+      "subagent": false
+    },
+    "danger": "low"
+  }
+}

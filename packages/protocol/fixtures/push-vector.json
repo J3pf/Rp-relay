@@ -1,0 +1,8 @@
+{
+  "description": "AES-256-GCM, AAD='rp1', tag de 16 B al final del ciphertext (base64)",
+  "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "nonce": "ZGVmZ2hpamtsbW5v",
+  "aad": "rp1",
+  "plaintext": "{\"promptId\":\"01JA0000000000000000000P01\",\"title\":\"⚠ Comando peligroso\",\"message\":\"rm -rf build/\"}",
+  "ciphertext": "MzmuFBaEJup3Bn3S+FVbtwPyNjq7XMNCl+GceMuTlXik2XDwHCKqJtHRDFaJLq/tIXl6fYBqAkeXkMKygKHV72TlvHy5OFQnp02AJmL5UIEBWiUW1ait662XFqYOeiI1oVPvPY2l4vbyHVmcTsPGSrYYlw=="
+}

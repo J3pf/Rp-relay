@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "t": "agents.update",
+  "ts": 1760342400000,
+  "d": {
+    "upsert": [
+      {
+        "agentId": "01JA0000000000000000000001:sess-1",
+        "machineId": "01JA0000000000000000000001",
+        "machineName": "Portátil personal",
+        "machineContext": "personal",
+        "machineColor": "#4F7DF3",
+        "sessionName": "refactor auth",
+        "cwd": "/home/jorge/proyectos/api",
+        "gitBranch": "main",
+        "model": "anthropic/claude-sonnet-5-5",
+        "status": "working",
+        "online": true,
+        "lastSeenAt": 1760342400000,
+        "openPromptCount": 1,
+        "lastMessagePreview": "Listo.",
+        "launcher": "gentle-shell",
+        "herdr": {
+          "paneId": "p3"
+        },
+        "gentleMode": "normal",
+        "redacted": false,
+        "spawnedByHost": false
+      }
+    ],
+    "remove": [
+      "x:y"
+    ]
+  }
+}

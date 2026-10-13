@@ -1,0 +1,97 @@
+{
+  "v": 1,
+  "t": "agent.hello",
+  "ts": 1760342400000,
+  "d": {
+    "agentId": "01JA0000000000000000000001:sess-1",
+    "kind": "pi",
+    "instance": "01JA0000000000000000000I01",
+    "epoch": "01JA0000000000000000000E01",
+    "pi": {
+      "version": "1.2.0",
+      "mode": "tui"
+    },
+    "plugin": {
+      "version": "0.1.0",
+      "features": [
+        "mirror_ui",
+        "adapters:gentle-ask",
+        "gate",
+        "rp_ask_user",
+        "attachments",
+        "deliver_terminal"
+      ]
+    },
+    "host": {
+      "hostname": "devbox",
+      "user": "jorge",
+      "pid": 4242,
+      "os": "linux"
+    },
+    "launcher": "gentle-shell",
+    "herdr": {
+      "paneId": "p3",
+      "tabId": "t1",
+      "workspaceId": "w2",
+      "session": null
+    },
+    "gentle": {
+      "version": "4.1.0",
+      "mode": "normal"
+    },
+    "transport": "ws",
+    "redacted": false,
+    "cwd": "/home/jorge/proyectos/api",
+    "spawnId": null,
+    "git": {
+      "branch": "main",
+      "dirty": true
+    },
+    "model": {
+      "provider": "anthropic",
+      "id": "claude-sonnet-5-5"
+    },
+    "thinking": "medium",
+    "status": "idle",
+    "openPrompts": [
+      {
+        "promptId": "01JA0000000000000000000P01",
+        "agentId": "01JA0000000000000000000001:sess-1",
+        "kind": "confirm",
+        "category": "permission",
+        "title": "⚠ Comando peligroso",
+        "message": "rm -rf build/",
+        "options": [
+          {
+            "id": "0",
+            "label": "Permitir"
+          },
+          {
+            "id": "1",
+            "label": "Permitir siempre (sesión)"
+          },
+          {
+            "id": "2",
+            "label": "Denegar"
+          }
+        ],
+        "allowFreeText": false,
+        "placeholder": null,
+        "questions": null,
+        "source": {
+          "extension": "gentle-pi",
+          "tool": "bash",
+          "subagent": false
+        },
+        "tool": {
+          "name": "bash",
+          "args": {
+            "command": "rm -rf build/"
+          }
+        },
+        "danger": "high",
+        "expiresAt": null
+      }
+    ]
+  }
+}

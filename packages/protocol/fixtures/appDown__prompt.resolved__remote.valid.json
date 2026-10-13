@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "t": "prompt.resolved",
+  "ts": 1760342400000,
+  "d": {
+    "promptId": "01JA0000000000000000000P01",
+    "by": "remote",
+    "answer": {
+      "optionIds": [
+        "0"
+      ]
+    },
+    "byDeviceId": "01JA0000000000000000000D01"
+  }
+}

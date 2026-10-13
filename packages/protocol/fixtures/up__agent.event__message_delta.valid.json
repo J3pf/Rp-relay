@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "t": "agent.event",
+  "ts": 1760342400000,
+  "d": {
+    "epoch": "01JA0000000000000000000E01",
+    "seq": 59,
+    "e": {
+      "type": "message_delta",
+      "contentIndex": 0,
+      "kind": "text",
+      "delta": "ho"
+    }
+  }
+}

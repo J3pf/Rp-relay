@@ -1,0 +1,93 @@
+{
+  "v": 1,
+  "t": "app.welcome",
+  "ts": 1760342400000,
+  "d": {
+    "machines": [
+      {
+        "machineId": "01JA0000000000000000000001",
+        "name": "Portátil personal",
+        "context": "personal",
+        "color": "#4F7DF3",
+        "icon": null,
+        "online": true,
+        "agentCount": 2,
+        "openPromptCount": 1,
+        "hostOnline": false
+      }
+    ],
+    "agents": [
+      {
+        "agentId": "01JA0000000000000000000001:sess-1",
+        "machineId": "01JA0000000000000000000001",
+        "machineName": "Portátil personal",
+        "machineContext": "personal",
+        "machineColor": "#4F7DF3",
+        "sessionName": "refactor auth",
+        "cwd": "/home/jorge/proyectos/api",
+        "gitBranch": "main",
+        "model": "anthropic/claude-sonnet-5-5",
+        "status": "working",
+        "online": true,
+        "lastSeenAt": 1760342400000,
+        "openPromptCount": 1,
+        "lastMessagePreview": "Listo.",
+        "launcher": "gentle-shell",
+        "herdr": {
+          "paneId": "p3"
+        },
+        "gentleMode": "normal",
+        "redacted": false,
+        "spawnedByHost": false
+      }
+    ],
+    "openPrompts": [
+      {
+        "promptId": "01JA0000000000000000000P01",
+        "agentId": "01JA0000000000000000000001:sess-1",
+        "kind": "confirm",
+        "category": "permission",
+        "title": "⚠ Comando peligroso",
+        "message": "rm -rf build/",
+        "options": [
+          {
+            "id": "0",
+            "label": "Permitir"
+          },
+          {
+            "id": "1",
+            "label": "Permitir siempre (sesión)"
+          },
+          {
+            "id": "2",
+            "label": "Denegar"
+          }
+        ],
+        "allowFreeText": false,
+        "placeholder": null,
+        "questions": null,
+        "source": {
+          "extension": "gentle-pi",
+          "tool": "bash",
+          "subagent": false
+        },
+        "tool": {
+          "name": "bash",
+          "args": {
+            "command": "rm -rf build/"
+          }
+        },
+        "danger": "high",
+        "expiresAt": null,
+        "state": "open",
+        "createdAt": 1760342400000,
+        "machineId": "01JA0000000000000000000001",
+        "machineName": "Portátil personal",
+        "machineContext": "personal",
+        "agentLabel": "refactor auth"
+      }
+    ],
+    "relayId": "01JA0000000000000000000R01",
+    "relayName": "Servidor casa"
+  }
+}

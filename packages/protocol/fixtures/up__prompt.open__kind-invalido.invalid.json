@@ -1,0 +1,43 @@
+{
+  "v": 1,
+  "t": "prompt.open",
+  "ts": 1760342400000,
+  "d": {
+    "promptId": "01JA0000000000000000000P01",
+    "agentId": "01JA0000000000000000000001:sess-1",
+    "kind": "carta",
+    "category": "permission",
+    "title": "⚠ Comando peligroso",
+    "message": "rm -rf build/",
+    "options": [
+      {
+        "id": "0",
+        "label": "Permitir"
+      },
+      {
+        "id": "1",
+        "label": "Permitir siempre (sesión)"
+      },
+      {
+        "id": "2",
+        "label": "Denegar"
+      }
+    ],
+    "allowFreeText": false,
+    "placeholder": null,
+    "questions": null,
+    "source": {
+      "extension": "gentle-pi",
+      "tool": "bash",
+      "subagent": false
+    },
+    "tool": {
+      "name": "bash",
+      "args": {
+        "command": "rm -rf build/"
+      }
+    },
+    "danger": "high",
+    "expiresAt": null
+  }
+}

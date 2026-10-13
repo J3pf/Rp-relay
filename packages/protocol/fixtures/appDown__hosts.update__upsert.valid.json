@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "t": "hosts.update",
+  "ts": 1760342400000,
+  "d": {
+    "upsert": [
+      {
+        "machineId": "01JA0000000000000000000001",
+        "hostname": "devbox",
+        "roots": [
+          "/home/u/proyectos"
+        ],
+        "online": true
+      }
+    ],
+    "remove": []
+  }
+}

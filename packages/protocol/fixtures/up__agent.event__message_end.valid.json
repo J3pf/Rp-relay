@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "t": "agent.event",
+  "ts": 1760342400000,
+  "d": {
+    "epoch": "01JA0000000000000000000E01",
+    "seq": 58,
+    "e": {
+      "type": "message_end",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Listo."
+          }
+        ]
+      }
+    }
+  }
+}

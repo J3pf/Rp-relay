@@ -1,0 +1,12 @@
+node_modules
+dist
+packages/*/dist
+*.tsbuildinfo
+.git
+.github
+test
+docs
+spikes
+deploy
+*.md
+coverage

@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "t": "agent.status",
+  "ts": 1760342400000,
+  "d": {
+    "status": "working",
+    "detail": "bash: npm test"
+  }
+}

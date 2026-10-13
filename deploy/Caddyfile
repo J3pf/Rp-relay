@@ -1,0 +1,10 @@
+# Sustituye el dominio. Caddy obtiene y renueva el certificado de Let's Encrypt automáticamente.
+# Requisitos: DNS A/AAAA apuntando a este servidor y puertos 80/443 abiertos (ufw allow 80,443/tcp).
+relay.midominio.com {
+	reverse_proxy 127.0.0.1:8787 {
+		# los WebSocket (Upgrade) se proxian solos; sin buffering para long-poll y descargas
+		flush_interval -1
+		# no cortar los WebSocket al recargar Caddy (la app y los plugins reconectarían igualmente)
+		stream_close_delay 5m
+	}
+}

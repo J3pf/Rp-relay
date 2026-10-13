@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "t": "app.hello",
+  "ts": 1760342400000,
+  "d": {
+    "deviceId": "01JA0000000000000000000D01",
+    "app": {
+      "version": "0.1.0"
+    },
+    "subscriptions": "all"
+  }
+}

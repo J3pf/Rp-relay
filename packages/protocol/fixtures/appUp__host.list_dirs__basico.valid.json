@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "t": "host.list_dirs",
+  "ts": 1760342400000,
+  "d": {
+    "machineId": "01JA0000000000000000000001",
+    "path": "/home/u/proyectos"
+  }
+}

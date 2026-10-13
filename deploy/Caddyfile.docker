@@ -1,0 +1,7 @@
+# Usado por docker-compose.yml: el dominio viene de RP_DOMAIN.
+{$RP_DOMAIN} {
+	reverse_proxy relay:8787 {
+		flush_interval -1
+		stream_close_delay 5m
+	}
+}

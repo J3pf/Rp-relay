@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "t": "agent.history",
+  "ts": 1760342400000,
+  "d": {
+    "agentId": "01JA0000000000000000000001:sess-1",
+    "epoch": "01JA0000000000000000000E01",
+    "entries": [],
+    "events": [
+      {
+        "seq": 58,
+        "ts": 1,
+        "e": {
+          "type": "message_end"
+        }
+      }
+    ],
+    "liveFromSeq": 58
+  }
+}

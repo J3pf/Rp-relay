@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "t": "host.hello",
+  "ts": 1760342400000,
+  "d": {
+    "machineId": "01JA0000000000000000000001",
+    "hostname": "devbox",
+    "roots": [
+      "/home/u/proyectos"
+    ],
+    "backends": {
+      "herdr": "0.9.3",
+      "tmux": "3.4",
+      "wt": false,
+      "console": false
+    },
+    "defaultBackend": "herdr",
+    "launchers": [
+      "gentle-shell",
+      "pi"
+    ],
+    "defaultLauncher": "gentle-shell"
+  }
+}

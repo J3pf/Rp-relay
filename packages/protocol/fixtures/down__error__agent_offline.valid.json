@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "t": "error",
+  "ts": 1760342400000,
+  "re": "01JA0000000000000000000M04",
+  "d": {
+    "code": "agent_offline",
+    "message": "agente sin conexión"
+  }
+}

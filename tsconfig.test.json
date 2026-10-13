@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": { "@j3pf/rp-protocol": ["./packages/protocol/src/index.ts"] }
+  },
+  "include": ["src", "test", "packages/protocol/src", "spikes", "vitest.config.ts"]
+}

@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "t": "agent.snapshot",
+  "ts": 1760342400000,
+  "d": {
+    "epoch": "01JA0000000000000000000E01",
+    "seq": 57,
+    "entries": [
+      {
+        "eid": "e1",
+        "kind": "user",
+        "at": 1,
+        "msg": {
+          "role": "user",
+          "content": "hola"
+        }
+      }
+    ],
+    "truncated": false
+  }
+}

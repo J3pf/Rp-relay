@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "t": "agent.statuses",
+  "ts": 1760342400000,
+  "d": {
+    "items": {
+      "gentle:mode": "Permissions: AUTO",
+      "rp": "📱"
+    }
+  }
+}
