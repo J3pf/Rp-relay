@@ -146,3 +146,199 @@ El cuerpo de cada push se cifra con AES‑256‑GCM con una clave por dispositiv
   clientes con `1012` y reconectan de inmediato; las migraciones se aplican al arrancar.
 - **Revocar:** `rp-relay devices revoke <id>` / `machines revoke <id>` (o desde la app). Cortan las conexiones al instante.
 - **Privacidad:** el relay nunca ejecuta nada en las PCs ni guarda credenciales de Pi. Los tokens sólo se guardan como SHA‑256.
+
+## Troubleshooting (Resolución de problemas)
+
+### 1. Puerto en uso (`EADDRINUSE`)
+
+**Síntoma:** El servicio no arranca y en los logs (`journalctl -u rp-relay -e`) aparece:
+`listen EADDRINUSE: address already in use 127.0.0.1:8787` (o puerto `80`/`443`).
+
+**Diagnóstico:**
+```bash
+# Identificar qué proceso está ocupando el puerto
+sudo ss -tulpn | grep -E "8787|80|443"
+# O con lsof:
+sudo lsof -i :8787
+```
+
+**Solución:**
+- Si quedó una instancia previa huérfana del relay:
+  ```bash
+  sudo systemctl restart rp-relay
+  ```
+- Si otro servicio del sistema utiliza el puerto `8787`, cambia el puerto de escucha del relay:
+  1. En `/etc/rp-relay/config.json`: cambia `"listen": { "host": "127.0.0.1", "port": 8788 }`.
+     *(O mediante la variable de entorno `RP_LISTEN_PORT=8788`).*
+  2. Si usas Caddy como proxy inverso, ajusta `/etc/caddy/Caddyfile` para apuntar al nuevo puerto:
+     `reverse_proxy 127.0.0.1:8788`
+  3. Recarga y reinicia los servicios:
+     ```bash
+     sudo systemctl daemon-reload
+     sudo systemctl restart rp-relay
+     sudo systemctl reload caddy
+     ```
+
+---
+
+### 2. Permisos del usuario `rp-relay` y rutas (`EACCES` / `EROFS`)
+
+**Síntoma:** Errores al arrancar como `EACCES: permission denied, open '/var/lib/rp-relay/relay.db'` o avisos en `rp-relay doctor` indicando permisos laxos o inaccesibles en `admin.token` o directorios.
+
+**Causa:** Archivos creados manualmente como `root` o permisos alterados tras copias/migraciones manuales.
+
+**Solución:**
+1. **Restablecer la propiedad de los datos al usuario del servicio:**
+   ```bash
+   sudo chown -R rp-relay:rp-relay /var/lib/rp-relay
+   sudo chmod 750 /var/lib/rp-relay
+   ```
+2. **Asegurar el archivo de token administrativo (debe ser `600`):**
+   ```bash
+   sudo chmod 600 /var/lib/rp-relay/admin.token 2>/dev/null || true
+   ```
+3. **Verificar permisos del archivo de configuración (dueño `root:rp-relay`, permisos `640`):**
+   ```bash
+   sudo chown root:rp-relay /etc/rp-relay/config.json
+   sudo chmod 640 /etc/rp-relay/config.json
+   ```
+4. **Aislamiento estricto en systemd (`ProtectSystem=strict`):**
+   La unidad `deploy/rp-relay.service` aplica aislamiento del sistema de archivos. Sólo `/var/lib/rp-relay` tiene permisos de escritura. Si configuraste un `dataDir` personalizado en otra ruta, debes agregarla a `ReadWritePaths=` en `/etc/systemd/system/rp-relay.service`:
+   ```ini
+   ReadWritePaths=/var/lib/rp-relay /ruta/personalizada
+   ```
+   Y aplicar cambios: `sudo systemctl daemon-reload && sudo systemctl restart rp-relay`.
+
+---
+
+### 3. Problemas con certificados TLS / HTTPS / Caddy / Let's Encrypt
+
+**Síntoma:** La app Android o el plugin no pueden conectar por HTTPS/WSS (`CERT_HAS_EXPIRED`, `ERR_CONNECTION_REFUSED`, `fetch failed`), o Caddy no emite el certificado.
+
+**Diagnóstico:**
+```bash
+# Ver los logs del proxy Caddy
+sudo journalctl -u caddy -e --no-pager
+# Comprobar si Caddy o el relay escuchan en los puertos 80 y 443
+sudo ss -tulpn | grep -E "80|443"
+```
+
+**Causas y soluciones comunes:**
+1. **Desafío HTTP-01 bloqueado por firewall en puerto 80:**
+   - Let's Encrypt requiere que el puerto `80/TCP` esté abierto y accesible desde internet para validar la propiedad del dominio (incluso si todo el tráfico final es HTTPS en el `443`).
+   - Si tienes activo el firewall UFW:
+     ```bash
+     sudo ufw allow 80/tcp
+     sudo ufw allow 443/tcp
+     sudo ufw status
+     ```
+   - Si tu servidor está en una red local / NAT, verifica que en tu router los puertos 80 y 443 externos estén redirigidos a la IP local del servidor.
+   - Si tu ISP residencial bloquea el puerto 80, utiliza la **Opción C (Tailscale)** o certificados con desafío DNS-01 en Caddy.
+2. **Registro DNS no apunta a la IP pública actual:**
+   - Verifica con `dig +short relay.midominio.com` o `nslookup relay.midominio.com` que el registro `A` resuelve a tu IP pública.
+3. **Modo TLS integrado (Opción A2 sin Caddy) en puertos privilegiados (<1024):**
+   - En Linux, un proceso sin privilegios de root (`rp-relay`) no puede enlazar los puertos 80 y 443 a menos que cuente con capacidades del kernel.
+   - En `/etc/systemd/system/rp-relay.service`, descomenta las líneas:
+     ```ini
+     AmbientCapabilities=CAP_NET_BIND_SERVICE
+     CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+     ```
+   - Aplica los cambios: `sudo systemctl daemon-reload && sudo systemctl restart rp-relay`.
+
+---
+
+### 4. Base de datos SQLite: Locks, WAL y verificación de integridad
+
+**Síntoma:** Error `SqliteError: database is locked` o `SQLITE_BUSY`, o fallos de lectura/escritura.
+
+**Causa:**
+- `rp-relay` utiliza SQLite en modo **WAL** (`Write-Ahead Logging`), creando `relay.db-wal` y `relay.db-shm` en `/var/lib/rp-relay/`.
+- Si el usuario `rp-relay` no tiene permisos para crear archivos en el directorio contenedor, o si un proceso externo (por ejemplo un CLI ejecutado como otro usuario) bloqueó la base.
+
+**Solución:**
+1. **Garantizar permisos de escritura en el directorio contenedor:**
+   SQLite necesita crear archivos temporales auxiliares junto a `relay.db`. Si el directorio no tiene permisos de escritura para `rp-relay`, fallará con `database is locked`.
+   ```bash
+   sudo chown -R rp-relay:rp-relay /var/lib/rp-relay
+   sudo chmod 750 /var/lib/rp-relay
+   ```
+2. **Verificar integridad física de la base de datos:**
+   ```bash
+   sudo -u rp-relay sqlite3 /var/lib/rp-relay/relay.db "PRAGMA integrity_check;"
+   # Debe responder exactamente: ok
+   ```
+3. **Identificar procesos bloqueantes:**
+   ```bash
+   sudo fuser -v /var/lib/rp-relay/relay.db
+   ```
+4. **Restaurar una copia de seguridad si hubiese corrupción:**
+   `rp-relay` crea copias automáticas con `VACUUM INTO` cada hora en `/var/lib/rp-relay/backups/`. Para restaurar:
+   ```bash
+   # Listar copias disponibles
+   sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay backup list
+
+   # Detener el servicio antes de restaurar
+   sudo systemctl stop rp-relay
+
+   # Restaurar la copia verificada
+   sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay restore /var/lib/rp-relay/backups/rp-YYYYMMDD-HHMMSS.db
+
+   # Iniciar el servicio
+   sudo systemctl start rp-relay
+   ```
+   *(La base anterior queda siempre respaldada como `relay.db.pre-restore-TIMESTAMP`).*
+
+---
+
+### 5. Timeout o fallos en el emparejamiento (`pair device` / `pair machine`)
+
+**Síntoma:** La app Android muestra "Código inválido o expirado" o Pi indica error al ejecutar `/rp pair`.
+
+**Causas y soluciones:**
+1. **Código expirado (validez de 10 minutos y un solo uso):**
+   - Los códigos generados tienen una validez de 10 minutos. Si expiran, genera uno nuevo:
+     ```bash
+     sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay pair device
+     # o para máquina:
+     sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay pair machine --name "Mi PC" --context personal
+     ```
+2. **Límite de tasa por IP (`rate limiting`):**
+   - Por seguridad contra fuerza bruta, el relay limita los intentos a **5 emparejamientos por minuto por IP** (`limits.pairAttemptsPerMinute`). Si se excede, el relay responde `HTTP 429`. Espera 60 segundos antes de reintentar.
+3. **Desincronización de reloj del servidor (NTP):**
+   - Los códigos y tokens dependen de timestamps UTC. Un desfase de reloj puede invalidar los códigos inmediatamente.
+   - Ejecuta `rp-relay doctor` para verificar el desfase:
+     ```bash
+     sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay doctor
+     ```
+   - Si indica desfase, sincroniza con `systemd-timesyncd`:
+     ```bash
+     sudo timedatectl set-ntp on
+     sudo timedatectl status
+     ```
+4. **URL pública inalcanzable (`publicUrl`):**
+   - El código QR contiene la `publicUrl` configurada en `/etc/rp-relay/config.json`.
+   - Si se configuró como `http://127.0.0.1:8787`, el teléfono móvil no podrá conectar porque intentará comunicarse consigo mismo.
+   - La `publicUrl` debe ser el dominio público (ej. `https://relay.tudominio.com`) o la dirección Tailscale accesible desde el móvil.
+   - Corrige el valor en `/etc/rp-relay/config.json` y reinicia el relay: `sudo systemctl restart rp-relay`.
+
+---
+
+### 6. Diagnóstico integrado con `rp-relay doctor`
+
+Ante cualquier duda o incidente, ejecuta la herramienta de diagnóstico integrada:
+
+```bash
+sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay doctor
+```
+
+El asistente evaluará automáticamente:
+- ✓ Versión del runtime de Node.js (requiere Node ≥ 22).
+- ✓ Lectura y sintaxis de `/etc/rp-relay/config.json`.
+- ✓ Directorio de datos y permisos seguros de `admin.token` (`600`).
+- ✓ Integridad física y versión del esquema de `relay.db`.
+- ✓ Espacio libre en disco.
+- ✓ Estado y presencia de copias de seguridad horarias.
+- ✓ Configuración de Firebase Cloud Messaging (si está activo).
+- ✓ Accesibilidad y latencia hacia la `publicUrl`.
+- ✓ Sincronización del reloj del sistema contra el servidor HTTP.
+

@@ -3,8 +3,8 @@
 Relay autoalojable (Ubuntu Server) que conecta tus agentes [Pi](https://github.com/earendil-works/pi) con la app Android
 **RP**: lista de agentes en vivo, chat, adjuntos y **notificaciones push de preguntas/autorizaciones respondibles desde el móvil**.
 
-> Estado: **implementado** (v0.1.0): relay completo (R0–R16 del [plan](docs/PLAN-RELAY.md)). Faltan por construir `rp-plugin` y `rp-app`,
-> y confirmar en un servidor real los puntos marcados «a confirmar» (Caddy, proxy de la empresa, FCM).
+> Estado: **v0.1.0 publicado**: relay completo (Fastify + ws + SQLite).
+> Probado e integrado de extremo a extremo con los repos hermanos [`rp-plugin`](https://github.com/j3pf/rp-plugin) (Pi) y [`rp-app`](https://github.com/j3pf/rp-app) (Android).
 
 | Documento | Contenido |
 |---|---|
@@ -27,7 +27,41 @@ RP_CONFIG=./config.json node dist/cli/index.js pair device    # QR para la app
 RP_CONFIG=./config.json node dist/cli/index.js doctor
 ```
 
-Instalación en producción (systemd + Caddy, TLS integrado o Docker): [docs/INSTALACION.md](docs/INSTALACION.md).
+## Despliegue en Ubuntu Server
+
+Para un servidor en producción (Ubuntu Server 22.04 / 24.04), dispones del instalador automatizado idempotente o instalación manual:
+
+```bash
+# Opción 1: Instalador automatizado con Caddy (TLS automático)
+sudo ./deploy/install.sh --public-url https://relay.midominio.com --caddy --name "Mi Relay"
+
+# Opción 2: Instalación manual paso a paso
+# Consulta la guía completa en docs/INSTALACION.md
+```
+
+### Rutas estándar del sistema
+- **Configuración:** `/etc/rp-relay/config.json` (dueño `root:rp-relay`, permisos `640`)
+- **Directorio de datos:** `/var/lib/rp-relay/` (dueño `rp-relay:rp-relay`, permisos `750`): contiene `relay.db`, `blobs/`, `backups/`, `admin.token`
+- **Servicio systemd:** `/etc/systemd/system/rp-relay.service` (`Type=notify`, `WatchdogSec=30`, usuario `rp-relay`)
+- **Binario CLI:** `/usr/bin/rp-relay` (o symlink)
+
+### Comandos CLI esenciales
+```bash
+# Diagnóstico completo de configuración, BD, reloj y red
+sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay doctor
+
+# Generar código QR para emparejar la app Android RP
+sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay pair device
+
+# Generar código para emparejar una PC (Pi)
+sudo -u rp-relay RP_CONFIG=/etc/rp-relay/config.json rp-relay pair machine --name "Mi PC" --context personal
+
+# Monitorear logs del servicio
+journalctl -u rp-relay -f
+```
+
+Guía completa de instalación, opciones de TLS integrado (ACME), Docker y Tailscale: [docs/INSTALACION.md](docs/INSTALACION.md).  
+Resolución de problemas comunes (puertos, certificados, SQLite, emparejamiento): [docs/INSTALACION.md#troubleshooting-resolución-de-problemas](docs/INSTALACION.md#troubleshooting-resolución-de-problemas).
 
 ## Desarrollo
 
