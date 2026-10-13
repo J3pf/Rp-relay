@@ -1,10 +1,11 @@
 # Plan — Relay (`rp-relay`)
 
-Ver contexto en [ARQUITECTURA.md](ARQUITECTURA.md) y contrato en [PROTOCOLO.md](PROTOCOLO.md).
+Ver contexto en [ARQUITECTURA.md](ARQUITECTURA.md), [COMPATIBILIDAD.md](COMPATIBILIDAD.md) (herdr, gentle-shell, separación por PC) y contrato en [PROTOCOLO.md](PROTOCOLO.md).
 
 ## 1. Responsabilidades
 
-1. Autenticar máquinas (plugins) y dispositivos (apps) por token; emparejamiento por código.
+1. Autenticar PCs (plugins y rp-host) y dispositivos (apps) por token; emparejamiento por código.
+   Cada PC tiene nombre, **contexto** (personal / empresa / …) y color: es el eje de separación en la app y en las notificaciones.
 2. Mantener el **registro de agentes** (online/offline) y difundir cambios a las apps.
 3. Enrutar en tiempo real: eventos agente → apps; mensajes/abort/respuestas app → agente.
 4. Persistir **historial** (eventos finales) para que la app vea lo ocurrido mientras estaba cerrada.
@@ -70,7 +71,10 @@ CREATE TABLE devices (
   created_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER);
 
 CREATE TABLE machines (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash BLOB NOT NULL UNIQUE,
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, hostname TEXT, token_hash BLOB NOT NULL UNIQUE,
+  context TEXT NOT NULL DEFAULT 'personal',   -- personal | work | texto libre
+  color TEXT NOT NULL DEFAULT '#4F7DF3', icon TEXT, quiet_hours TEXT,          -- JSON {from,to,tz}
+  host_info TEXT,                              -- último host.hello (rp-host) en JSON
   created_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER);
 
 CREATE TABLE pairing_codes (
@@ -79,7 +83,8 @@ CREATE TABLE pairing_codes (
 
 CREATE TABLE agents (
   id TEXT PRIMARY KEY, machine_id TEXT NOT NULL REFERENCES machines(id),
-  epoch TEXT NOT NULL, session_id TEXT NOT NULL, session_name TEXT, session_file TEXT,
+  instance TEXT NOT NULL, epoch TEXT NOT NULL, session_id TEXT NOT NULL, session_name TEXT, session_file TEXT,
+  launcher TEXT, herdr TEXT, gentle TEXT, statuses TEXT, redacted INTEGER NOT NULL DEFAULT 0, spawn_id TEXT,
   cwd TEXT, git_branch TEXT, model TEXT, thinking TEXT, status TEXT NOT NULL,
   online INTEGER NOT NULL, pid INTEGER, pi_version TEXT, plugin_version TEXT, features TEXT,
   last_seq INTEGER NOT NULL DEFAULT 0, last_preview TEXT,
@@ -111,7 +116,12 @@ Estado `answered` = respuesta recibida pero el plugin aún no confirmó (`prompt
 ## 5. Lógica clave
 
 ### 5.1 Hub de conexiones
-- `Map<agentId, AgentConn>`; una sola conexión viva por `agentId`: si llega otra, la anterior se cierra con `4003`.
+- `Map<agentId, AgentConn>`; una sola conexión viva por `agentId` (= `machineId:piSessionId`): si llega otra con distinto
+  `instance`, la anterior se cierra con `4003`. Como el `agentId` es estable, un agente reanudado por herdr o
+  `pi --continue` conserva su historial en la app.
+- `Map<machineId, HostConn>` para `rp-host` (`/ws/host`); `host.*` de la app se enrutan por `machineId`.
+- Conexiones long-poll del plugin (`/v1/agent/send|poll`) se registran en el mismo hub con un adaptador que
+  implementa la misma interfaz `AgentConn` (cola por agente; `poll` mantiene la petición abierta ≤25 s).
 - `Set<AppConn>` con suscripciones por agente (todas las apps reciben `agents.update` y `prompt.*`; sólo las suscritas
   reciben `agent.event` de ese agente).
 - Desconexión de agente → `online=0`, `agents.update`; sus prompts abiertos **se mantienen 2 min** (por si reconecta,
@@ -142,9 +152,12 @@ error `agent_timeout`).
 - Después, el agente queda suscrito en vivo (incluye `message_delta` no persistidos).
 
 ### 5.5 Push dispatcher
-- Selecciona dispositivos no revocados con `fcm_token` y cuyas `notify_prefs` permitan la categoría/agente
-  (por defecto: `permission` y `question` siempre; `settled` sólo si ningún dispositivo tiene la app en primer plano
-  viendo ese agente; `error` siempre; `terminal_wait` sí).
+- Selecciona dispositivos no revocados con `fcm_token` y cuyas `notify_prefs` permitan la categoría **para esa PC**
+  (`prefs.machines[machineId]` sobrescribe a `prefs.categories`; PC silenciada o en horas silenciosas → no se envía,
+  salvo `danger=high` si el usuario activó "autorizaciones críticas siempre"). Por defecto: `permission` y `question`
+  siempre; `settled` sólo si ningún dispositivo tiene la app en primer plano viendo ese agente; `error` siempre;
+  `terminal_wait` sí.
+- El cuerpo incluye `machineName`/`machineContext` para que la app elija el canal de notificación de esa PC.
 - Cifra cuerpo con `pushKey` del dispositivo (AES‑256‑GCM, nonce 12 B aleatorio, AAD `"rp1"`).
 - `messaging.send({ token, data, android: { priority, ttl, collapseKey } })`.
 - Error `messaging/registration-token-not-registered` → borrar `fcm_token`.
@@ -171,7 +184,8 @@ error `agent_timeout`).
 | `rp-relay init` | Crea config, `dataDir`, DB y migra. Interactivo o con flags. |
 | `rp-relay serve` | Arranca el servidor (lo usa systemd). |
 | `rp-relay pair device` | Crea código de 10 min y muestra **QR en la terminal** con `rp://pair?u=<publicUrl>&c=<code>` |
-| `rp-relay pair machine` | Código para una máquina: el usuario ejecuta en Pi `/rp pair <publicUrl> <code>` |
+| `rp-relay pair machine [--name N] [--context personal|work]` | Código para una PC: el usuario ejecuta en Pi `/rp pair <publicUrl> <code>` |
+| `rp-relay machines set <id> --name/--context/--color` | Editar PC |
 | `rp-relay devices|machines list|revoke <id>` | Gestión |
 | `rp-relay push test [deviceId]` | Envía notificación de prueba |
 | `rp-relay doctor` | Comprueba config, DB, permisos, FCM, `publicUrl` alcanzable, reloj |
@@ -252,4 +266,6 @@ CI (GitHub Actions): lint, typecheck, test, build Docker, publicar `@j3pf/rp-pro
 | R8 | Push: cifrado, FCM, prefs, re‑push, cancel | 2 | 1,5 d |
 | R9 | Blobs: upload/download/GC, límites | 3 | 1 d |
 | R10 | Retención, `doctor`, systemd/Caddy/Docker, install.sh, docs de instalación | 3 | 1,5 d |
-| R11 | Endpoints para `rp-host` (lanzar agentes, ver PLAN-PLUGIN §9) | 3 | 1 d |
+| R11 | `/ws/host` + enrutamiento `host.*` (PROTOCOLO §9) | 3 | 1 d |
+| R12 | PCs: contexto/color/horas silenciosas, `PATCH`, prefs por PC en dispatcher, `machines.update` | 1–2 | 1 d |
+| R13 | Transporte long-poll para plugins tras proxy corporativo | 2 | 1 d |

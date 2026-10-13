@@ -43,7 +43,8 @@ Códigos: `bad_request`, `unauthorized`, `not_found`, `conflict` (p. ej. prompt 
 |---|---|---|
 | `machineId` | ULID | relay, al emparejar la máquina |
 | `deviceId` | ULID | relay, al emparejar el teléfono |
-| `agentId` | `<piSessionId>~<instanceTag>` | plugin. `instanceTag` = 6 hex aleatorios por proceso para distinguir dos `pi` abiertos sobre la misma sesión |
+| `agentId` | `<machineId>:<piSessionId>` | plugin. Estable aunque el proceso se reinicie (reanudación de herdr, `pi --continue`) |
+| `instance` | ULID | plugin, uno por proceso; si dos procesos abren la misma sesión, el relay mantiene el más reciente (`4003` al otro) |
 | `promptId` | ULID | plugin |
 | `blobId` | ULID | relay |
 | `seq` | entero ≥1, por agente, monotónico | plugin (reinicia contador por `epoch`) |
@@ -53,11 +54,16 @@ Códigos: `bad_request`, `unauthorized`, `not_found`, `conflict` (p. ej. prompt 
 
 ### `agent.hello` (primer mensaje obligatorio, espera `agent.welcome`)
 ```jsonc
-{ "agentId":"…", "epoch":"…",
+{ "agentId":"…", "instance":"…", "epoch":"…",
   "pi": { "version":"1.2.0", "mode":"tui" },        // ctx.mode
-  "plugin": { "version":"0.1.0", "features":["mirror_ui","gate","ask_user","attachments"] },
+  "plugin": { "version":"0.1.0", "features":["mirror_ui","adapters:gentle-ask","gate","rp_ask_user","attachments","deliver_terminal"] },
   "session": { "id":"…", "file":"/home/u/.pi/agent/sessions/…jsonl", "name":"refactor auth" },
   "host": { "hostname":"devbox", "user":"jorge", "pid":4242, "os":"linux" },
+  "launcher":"gentle-shell",                         // pi | gentle-shell
+  "herdr": { "paneId":"p3", "tabId":"t1", "workspaceId":"w2", "session":null },   // null si no corre en herdr
+  "gentle": { "version":"4.1.0", "mode":"normal" },  // null si gentle-pi no está; mode: normal|auto|yolo|unknown
+  "transport":"ws",                                  // ws | longpoll
+  "redacted": false,                                 // true → no se envían message_*/resultados
   "cwd":"/home/jorge/proyectos/api", "spawnId": null,   // RP_SPAWN_ID si lo lanzó rp-host
   "git": { "branch":"main", "dirty":true },
   "model": { "provider":"anthropic", "id":"…" }, "thinking":"medium",
@@ -93,23 +99,27 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 | `ui_prompt_start/end` con `kind:"custom"|"editor"` | sí, como `{type:"terminal_wait", kind, title, active:bool}` | no |
 
 ### `agent.status` — `{ "status":"working", "detail":"bash: npm test" }` (cambios de estado derivados)
+### `agent.statuses` — `{ "items": { "gentle:mode":"Permissions: AUTO", "rp":"📱", … } }` (estado completo de `setStatus` de todas las extensiones, coalescido ≤1/s; `gentle.mode` se deriva de aquí)
 
 ### `prompt.open` (espera `ack`)
 ```jsonc
 { "promptId":"…", "agentId":"…",
-  "kind":"confirm" | "select" | "input" | "multi" ,
+  "kind":"confirm" | "select" | "input" | "questionnaire",
   "category":"permission" | "question" | "dialog",   // gate propio | ask_user | espejo de otra extensión
   "title":"⚠ Comando peligroso",
   "message":"rm -rf build/",                          // opcional, texto plano
   "options":[ {"id":"0","label":"Permitir"}, {"id":"1","label":"Permitir siempre (sesión)"}, {"id":"2","label":"Denegar"} ],
   "allowFreeText": false, "placeholder": null,
+  "questions": null,  // sólo kind=questionnaire: [{ "question", "header", "multiSelect":false, "allowFreeText":false,
+                      //   "options":[{"id","label","description","preview"}] }]  (1–4 preguntas, como ask_user_question de gentle-pi)
+  "source": { "extension":"gentle-pi", "tool":"ask_user_question", "subagent": false },  // informativo
   "tool": { "name":"bash", "args": { "command":"rm -rf build/" } },  // sólo category=permission
   "danger": "high",                                   // low | medium | high → prioridad de notificación
   "expiresAt": null }                                  // epoch ms o null (sin límite)
 ```
 ### `prompt.resolved` — `{ "promptId":"…", "by":"local"|"remote"|"timeout"|"cancelled", "answer": Answer|null }`
 ### `prompt.ack` — `{ "promptId":"…", "accepted": true }` (respuesta a `prompt.answer`; `false` si ya estaba resuelto/no existe)
-### `user.message.ack` — `{ "clientMsgId":"…", "disposition":"sent"|"queued_steer"|"queued_followup"|"rejected", "error":null }`
+### `user.message.ack` — `{ "clientMsgId":"…", "disposition":"sent"|"queued_steer"|"queued_followup"|"typed"|"command"|"rejected", "error":null|"agent_blocked"|"herdr_unavailable" }`
 
 ## 5. Relay → Plugin
 
@@ -117,12 +127,13 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 |---|---|
 | `agent.welcome` | `{ "serverTime":…, "lastSeq":56 | null, "pendingAnswers":[prompt.answer…] }` (si `lastSeq` del mismo `epoch` < actual, el plugin no necesita reenviar; el snapshot se manda siempre) |
 | `agent.resync` | `{}` → el plugin envía `agent.snapshot` |
-| `user.message` | `{ "clientMsgId":"…", "deviceId":"…", "text":"…", "attachments":[{"blobId","name","mime","size"}], "delivery":"auto"|"steer"|"followUp" }` |
+| `user.message` | `{ "clientMsgId":"…", "deviceId":"…", "text":"…", "attachments":[{"blobId","name","mime","size"}], "delivery":"auto"|"steer"|"followUp"|"terminal", "asCommand": false }` (`terminal` = vía herdr como tecleado; `asCommand` = texto `/…` ejecutado como comando de Pi) |
 | `agent.abort` | `{}` → `ctx.abort()` |
 | `prompt.answer` | `{ "promptId":"…", "answer": Answer, "deviceId":"…" }` |
 | `prompt.cancel` | `{ "promptId":"…" }` (expirado por el relay) |
 
-`Answer` = `{ "optionIds":["0"] }` | `{ "confirmed":true }` | `{ "text":"…" }` | `{ "cancelled":true }`.
+`Answer` = `{ "optionIds":["0"] }` | `{ "confirmed":true }` | `{ "text":"…" }` | `{ "cancelled":true }` |
+`{ "answers":[ { "questionIndex":0, "optionIds":["1"] } | { "questionIndex":1, "text":"…" } ] }` (questionnaire; varias `optionIds` si `multiSelect`).
 
 ## 6. App ⇄ Relay (`/ws/app`)
 
@@ -130,7 +141,7 @@ App → Relay:
 
 | Tipo | Cuerpo | Respuesta |
 |---|---|---|
-| `app.hello` | `{ "deviceId", "app":{"version"}, "subscriptions":"all" }` | `app.welcome { agents:[AgentSummary], openPrompts:[Prompt] }` |
+| `app.hello` | `{ "deviceId", "app":{"version"}, "subscriptions":"all" }` | `app.welcome { machines:[MachineSummary], agents:[AgentSummary], openPrompts:[Prompt] }` |
 | `agent.subscribe` | `{ "agentId", "sinceSeq": 120 | null, "epoch": "…" | null }` | `agent.history { agentId, epoch, entries:[…], events:[…], liveFromSeq }` y luego eventos en vivo |
 | `agent.unsubscribe` | `{ "agentId" }` | — |
 | `user.message` | igual que §5 + `agentId` | `user.message.ack` (reenviado del plugin) o `error agent_offline` |
@@ -138,22 +149,27 @@ App → Relay:
 | `prompt.answer` | `{ "promptId", "answer" }` | `prompt.answer.result { ok, reason? }` (`reason`: `already_resolved` / `agent_offline_queued`) |
 | `agent.forget` | `{ "agentId" }` (borrar agente offline de la lista) | `ack` |
 
-Relay → App: `agents.update { upsert:[AgentSummary], remove:[agentId] }`, `agent.event { agentId, epoch, seq, e }`,
+Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`, `agents.update { upsert:[AgentSummary], remove:[agentId] }`, `agent.event { agentId, epoch, seq, e }`,
 `prompt.opened { Prompt }`, `prompt.resolved { promptId, by, answer, byDeviceId? }`, `terminal_wait {agentId,…}`.
 
-`AgentSummary` = `{ agentId, machineId, machineName, sessionName, cwd, gitBranch, model, status, online, lastSeenAt, openPromptCount, lastMessagePreview (≤140 chars) }`.
+`AgentSummary` = `{ agentId, machineId, machineName, machineContext, machineColor, sessionName, cwd, gitBranch, model, status, online, lastSeenAt, openPromptCount, lastMessagePreview (≤140 chars), launcher, herdr, gentleMode, redacted, spawnedByHost }`.
+
+`MachineSummary` (en `app.welcome.machines` y `machines.update`) = `{ machineId, name, context:"personal"|"work"|string, color:"#RRGGBB", icon, online, agentCount, openPromptCount, hostOnline }`.
 
 ## 7. HTTP API (`/v1`)
 
 | Método | Ruta | Auth | Descripción |
 |---|---|---|---|
 | `POST` | `/v1/pair/device` | código | `{ code, name, fcmToken? }` → `{ deviceId, deviceToken, pushKey (base64 32 B), relayName }` |
-| `POST` | `/v1/pair/machine` | código | `{ code, hostname }` → `{ machineId, machineToken }` |
+| `POST` | `/v1/pair/machine` | código | `{ code, hostname, name?, context? }` → `{ machineId, machineToken }` |
 | `POST` | `/v1/pair/codes` | device | crear código para emparejar una máquina desde la app → `{ code, expiresAt }` |
 | `PUT` | `/v1/devices/me/push` | device | `{ fcmToken }` (onNewToken) |
 | `POST` | `/v1/devices/me/push-test` | device | envía una notificación de prueba a este dispositivo |
 | `GET` | `/v1/devices` / `DELETE /v1/devices/{id}` | device | listar / revocar |
 | `GET` | `/v1/machines` / `DELETE /v1/machines/{id}` | device | listar / revocar |
+| `PATCH` | `/v1/machines/{id}` | device | `{ name?, context?, color?, icon?, quietHours? }` |
+| `PUT` | `/v1/devices/me/prefs` | device | preferencias de notificación globales y por PC: `{ categories:{…}, machines:{ "<machineId>": { mute:false, categories:{…}, quietHours:{from:"20:00",to:"08:00",tz:"America/Bogota"} } } }` |
+| `POST` | `/v1/agent/send` · `/v1/agent/poll` | machine | transporte de respaldo long-poll del plugin: `send` recibe un array de mensajes del §4; `poll` espera hasta 25 s y devuelve un array de mensajes del §5 |
 | `GET` | `/v1/agents` | device | lista (fallback sin WS) |
 | `GET` | `/v1/prompts?state=open` | device | preguntas abiertas |
 | `POST` | `/v1/prompts/{id}/answer` | device | `{ answer }` → `200 {ok:true}` / `409 already_resolved` — **usado por los botones de la notificación** |
@@ -172,7 +188,8 @@ Mensaje **data-only**, `android.priority = "high"` para `prompt` y `"normal"` pa
 { "v":"1", "k":"prompt"|"cancel"|"settled"|"error"|"terminal_wait",
   "n": "<base64 nonce 12B>", "c": "<base64 AES-256-GCM(JSON del cuerpo, key=pushKey del dispositivo, aad='rp1')>" }
 ```
-Cuerpo descifrado para `k=prompt`: `{ promptId, agentId, agentLabel, kind, category, title, message (≤500 chars), options:[{id,label}] (≤3 para botones), allowFreeText, danger }`.
+Cuerpo descifrado para `k=prompt`: `{ promptId, agentId, agentLabel, machineId, machineName, machineContext, kind, category, title, message (≤500 chars), options:[{id,label}] (≤3 para botones), allowFreeText, danger }`.
+`questionnaire` nunca lleva botones: la notificación abre la hoja de respuesta.
 Para `k=cancel`: `{ promptId }`. Para `k=settled`: `{ agentId, agentLabel, preview }`.
 Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el detalle por `GET /v1/prompts`.
 
@@ -180,10 +197,10 @@ Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el det
 
 | Dirección | Tipo | Cuerpo |
 |---|---|---|
-| host → relay | `host.hello` | `{ machineId, hostname, roots:["/home/u/proyectos"], tmux:"3.4", pi:"1.2.0" }` |
+| host → relay | `host.hello` | `{ machineId, hostname, roots:["/home/u/proyectos"], backends:{ herdr:"0.9.3"|null, tmux:"3.4"|null }, defaultBackend:"herdr", launchers:["gentle-shell","pi"], defaultLauncher:"gentle-shell" }` |
 | app → relay → host | `host.list_dirs` | `{ machineId, path }` → `host.dirs { path, dirs:[nombre…] }` (sólo dentro de `roots`) |
-| app → relay → host | `host.spawn` | `{ machineId, cwd, name?, initialPrompt? }` → `host.spawned { tmuxSession, pid }` o `error` |
-| app → relay → host | `host.kill` | `{ machineId, tmuxSession }` (sólo sesiones `rp-*` creadas por el host) |
+| app → relay → host | `host.spawn` | `{ machineId, cwd, name?, launcher?, backend?, initialPrompt? }` → `host.spawned { spawnId, backend, herdr:{workspaceId,paneId}|null, tmuxSession|null }` o `error` |
+| app → relay → host | `host.kill` | `{ machineId, spawnId }` (sólo agentes creados por el host) |
 | relay → app | `hosts.update` | `{ upsert:[{machineId, hostname, roots, online}], remove:[machineId] }` |
 
 `initialPrompt` lo retiene el relay hasta 60 s y lo entrega como `user.message` al primer `agent.hello` que traiga el mismo `spawnId`: rp-host lanza Pi con la variable de entorno
