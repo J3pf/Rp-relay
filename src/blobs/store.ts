@@ -94,7 +94,9 @@ export class BlobStore {
 		for (const f of readdirSync(this.dir)) {
 			const full = join(this.dir, f);
 			const id = f.replace(/\.part$/, "");
-			const age = now - statSync(full).mtimeMs;
+			const st = statSync(full, { throwIfNoEntry: false });
+			if (!st) continue;
+			const age = now - st.mtimeMs;
 			if ((f.endsWith(".part") && age > 3_600_000) || (!f.endsWith(".part") && !known.has(id) && age > 3_600_000)) {
 				await rm(full, { force: true });
 				n++;

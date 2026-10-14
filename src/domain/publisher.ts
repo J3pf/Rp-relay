@@ -9,6 +9,8 @@ export class Publisher {
 		const { repos, hub, summaries } = this.c();
 		const row = repos.agents.get(agentId);
 		if (!row) return;
+		const m = repos.machines.get(row.machine_id);
+		if (m?.revoked_at) return;
 		const s = summaries.agent(row);
 		hub.broadcastApps(envelope("agents.update", { upsert: [s], remove: [] }), { mode: "foreground" });
 		// el canal directo recibe la versión resumida (sin vista previa del último mensaje)

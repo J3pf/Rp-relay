@@ -239,4 +239,32 @@ describe("rp-host (/ws/host)", () => {
 		agent.client.close();
 		void helloBody;
 	});
+
+	it("dos apps enviando el mismo env.id en paralelo no colisionan en pending", async () => {
+		const dev1 = await pairDevice(t, "App1");
+		const dev2 = await pairDevice(t, "App2");
+		const m = await pairMachine(t);
+		const host = await connectHost(m);
+		const { client: app1 } = await connectApp(t, dev1);
+		const { client: app2 } = await connectApp(t, dev2);
+
+		app1.raw(JSON.stringify({ v: 1, t: "host.list_dirs", id: "DUP-1", d: { machineId: m.machineId, path: "/a" } }));
+		app2.raw(JSON.stringify({ v: 1, t: "host.list_dirs", id: "DUP-1", d: { machineId: m.machineId, path: "/b" } }));
+
+		const reqA = await host.next((e) => e.t === "host.list_dirs" && (e.d as any).path === "/a");
+		const reqB = await host.next((e) => e.t === "host.list_dirs" && (e.d as any).path === "/b");
+		expect(reqA.id).not.toBe(reqB.id);
+
+		host.send("host.dirs", { path: "/a", dirs: ["only-a"] }, { re: reqA.id });
+		host.send("host.dirs", { path: "/b", dirs: ["only-b"] }, { re: reqB.id });
+
+		const res1 = await app1.next("host.dirs");
+		const res2 = await app2.next("host.dirs");
+		expect(res1.re).toBe("DUP-1");
+		expect((res1.d as any).dirs).toEqual(["only-a"]);
+		expect(res2.re).toBe("DUP-1");
+		expect((res2.d as any).dirs).toEqual(["only-b"]);
+
+		for (const c of [host, app1, app2]) c.close();
+	});
 });

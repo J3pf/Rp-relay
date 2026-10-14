@@ -459,6 +459,11 @@ describe("revocación", () => {
 		expect(r.status).toBe(200);
 		expect((await agent.client.waitClosed()).code).toBe(4001);
 		await app.next((e) => e.t === "machines.update" && (e.d as any).remove?.includes(m.machineId));
+		// el cierre asíncrono del socket del agente NO vuelve a publicar el agente revocado como upsert
+		await app.never(
+			(e) => e.t === "agents.update" && (e.d as any).upsert?.some((a: any) => a.agentId === agent.agentId),
+			150,
+		);
 		// el token revocado ya no conecta
 		const again = await Client.connect(`${t.ws}/ws/agent`, m.machineToken);
 		expect((await again.waitClosed()).code).toBe(4001);
@@ -468,6 +473,51 @@ describe("revocación", () => {
 		expect(r2.status).toBe(200);
 		expect((await app2.waitClosed()).code).toBe(4001);
 		expect((await api(t, "GET", "/v1/agents", dev2.deviceToken)).status).toBe(401);
+		app.close();
+	});
+
+	it("onSnapshot publica agents.update; history.build reanuda en first-1 y trunca entries antes que events", async () => {
+		const dev = await pairDevice(t);
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "s-snap-hist");
+		const { client: app } = await connectApp(t, dev);
+		agent.client.send("agent.snapshot", {
+			epoch: agent.hello.epoch,
+			seq: 10,
+			entries: [
+				{ eid: "e1", kind: "user", at: 1, msg: { role: "user", content: "x".repeat(400_000) } },
+				{ eid: "e2", kind: "user", at: 2, msg: { role: "user", content: "y".repeat(400_000) } },
+			],
+		});
+		const snapUpd = await app.next(
+			(e) => e.t === "agents.update" && (e.d as any).upsert?.[0]?.agentId === agent.agentId,
+		);
+		expect(snapUpd).toBeTruthy();
+
+		agent.client.send("agent.event", {
+			epoch: agent.hello.epoch,
+			seq: 11,
+			e: { type: "message_end", message: { role: "assistant", content: "z".repeat(200_000) } },
+		});
+		agent.client.send("agent.event", {
+			epoch: agent.hello.epoch,
+			seq: 12,
+			e: { type: "message_end", message: { role: "assistant", content: "fin" } },
+		});
+		await sleep(80);
+
+		// sinceSeq === first - 1 (10 === 11 - 1) reanuda sin recargar snapshot
+		const resumed = t.relay.ctx.history.build(agent.agentId, 10, agent.hello.epoch);
+		expect(resumed.entries).toHaveLength(0);
+		expect(resumed.events.map((e) => e.seq)).toEqual([11, 12]);
+
+		// presupuesto de frame superado en carga completa: trunca entries antes que events
+		const full = t.relay.ctx.history.build(agent.agentId, null, null);
+		expect(full.truncated).toBe(true);
+		expect(full.entries.length).toBeLessThan(2);
+		expect(full.events.map((e) => e.seq)).toEqual([11, 12]);
+
+		agent.client.close();
 		app.close();
 	});
 

@@ -168,4 +168,29 @@ describe("transporte long-poll (plugin tras proxy corporativo)", () => {
 		const dev = await pairDevice(t);
 		expect((await api(t, "POST", "/v1/agent/send", dev.deviceToken, [])).status).toBe(401);
 	});
+
+	it("hello inválido cuenta como rechazado y múltiples agentes en la misma PC se enrutan por agentId", async () => {
+		const dev = await pairDevice(t);
+		const m = await pairMachine(t);
+		const other = await pairMachine(t);
+		// hello con agentId de otra PC falla y no deja sesión activa ni acepta mensajes posteriores del lote
+		const badBatch = await send(m, [
+			env("agent.hello", helloBody(other.machineId, "bad")),
+			env("agent.status", { status: "working" }),
+		]);
+		expect(badBatch.json).toEqual({ ok: true, accepted: 0, rejected: 2 });
+
+		// dos agentes long-poll en la misma PC
+		const h1 = helloBody(m.machineId, "lp-m1", { transport: "longpoll" });
+		const h2 = helloBody(m.machineId, "lp-m2", { transport: "longpoll" });
+		await send(m, [env("agent.hello", h1), env("agent.hello", h2)]);
+		const r = await send(m, [
+			env("agent.status", { status: "working" }, { agentId: h1.agentId }),
+			env("agent.status", { status: "error", detail: "boom", agentId: h2.agentId }),
+		]);
+		expect(r.json).toEqual({ ok: true, accepted: 2, rejected: 0 });
+		const list = (await api(t, "GET", "/v1/agents", dev.deviceToken)).json.agents as any[];
+		expect(list.find((a) => a.agentId === h1.agentId)?.status).toBe("working");
+		expect(list.find((a) => a.agentId === h2.agentId)?.status).toBe("error");
+	});
 });

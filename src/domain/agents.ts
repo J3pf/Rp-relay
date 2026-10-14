@@ -83,14 +83,14 @@ export class AgentService {
 	}
 
 	onSnapshot(conn: AgentConn, s: AgentSnapshot): void {
-		const { repos, hub } = this.c();
+		const { repos, publisher } = this.c();
 		if (!conn.agentId) return;
 		if (s.epoch !== conn.epoch) this.switchEpoch(conn, s.epoch);
 		repos.events.putSnapshot(conn.agentId, s.epoch, s.seq, { entries: s.entries, truncated: s.truncated ?? false });
 		conn.lastSeq = Math.max(conn.lastSeq, s.seq);
 		repos.agents.setSeq(conn.agentId, s.seq);
 		// los suscriptores que esperaban un historial sin snapshot pueden pedirlo de nuevo; avisamos con agents.update
-		void hub;
+		publisher.agent(conn.agentId);
 	}
 
 	private switchEpoch(conn: AgentConn, epoch: string): void {

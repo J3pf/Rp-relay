@@ -42,9 +42,13 @@ export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 		keyGenerator: (req) => {
 			const auth = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
 			const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-			// Token verificado con formato estándar (rpd_/rpm_/admin); si no, agrupar por IP
-			if (token && (token.startsWith("rpd_") || token.startsWith("rpm_"))) {
-				return token.slice(-24);
+			// Token verificado con formato estándar (rpd_/rpm_); si no es válido, agrupar por IP
+			if (token.startsWith("rpd_")) {
+				const d = c().auth.device(req.headers);
+				if (d.ok) return `dev:${d.row.id}`;
+			} else if (token.startsWith("rpm_")) {
+				const m = c().auth.machine(req.headers);
+				if (m.ok) return `mac:${m.row.id}`;
 			}
 			return req.ip;
 		},

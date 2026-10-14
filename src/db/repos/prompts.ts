@@ -45,9 +45,9 @@ export class PromptsRepo {
 		return (
 			this.db
 				.prepare(
-					"UPDATE prompts SET state='answered', answer=?, answered_by_device=?, answered_at=? WHERE id=? AND state='open'",
+					"UPDATE prompts SET state='answered', answer=?, answered_by_device=?, answered_at=? WHERE id=? AND state='open' AND (expires_at IS NULL OR expires_at>?)",
 				)
-				.run(JSON.stringify(answer), deviceId, now, id).changes > 0
+				.run(JSON.stringify(answer), deviceId, now, id, now).changes > 0
 		);
 	}
 	/** Cierra un prompt abierto o respondido. Devuelve la fila anterior si hubo transición. */
@@ -113,12 +113,17 @@ export class PromptsRepo {
 		return m;
 	}
 	/** 'answered' sin entregar durante más de un día se da por expirado. */
-	expireStaleAnswered(before: number): number {
-		return this.db
-			.prepare(
-				"UPDATE prompts SET state='expired', resolved_by='relay_timeout', resolved_at=? WHERE state='answered' AND answered_at<?",
-			)
-			.run(Date.now(), before).changes;
+	expireStaleAnswered(before: number): PromptRow[] {
+		const rows = this.db
+			.prepare("SELECT * FROM prompts WHERE state='answered' AND answered_at<?")
+			.all(before) as PromptRow[];
+		const expired: PromptRow[] = [];
+		const now = Date.now();
+		for (const r of rows) {
+			const prev = this.close(r.id, "expired", "relay_timeout", null, now);
+			if (prev) expired.push(prev);
+		}
+		return expired;
 	}
 	purgeClosed(before: number): number {
 		return this.db.prepare("DELETE FROM prompts WHERE state NOT IN ('open','answered') AND resolved_at<?").run(before)

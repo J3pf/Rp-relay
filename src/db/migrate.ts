@@ -19,9 +19,14 @@ export function readMigrations(dir = MIGRATIONS_DIR): MigrationFile[] {
 }
 
 export function currentVersion(db: Database): number {
-	db.exec(
-		"CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)",
-	);
+	if (db.readonly) {
+		const tbl = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get();
+		if (!tbl) return 0;
+	} else {
+		db.exec(
+			"CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL)",
+		);
+	}
 	const row = db.prepare("SELECT MAX(version) AS v FROM schema_migrations").get() as { v: number | null };
 	return row.v ?? 0;
 }

@@ -145,6 +145,18 @@ describe("adjuntos (blobs)", () => {
 			(await fetch(`${t.http}/v1/blobs/${up.json.blobId}`, { headers: { authorization: `Bearer ${dev.deviceToken}` } }))
 				.status,
 		).toBe(404);
+
+		// un archivo .part que desaparece durante el barrido asíncrono no provoca ENOENT
+		const p1 = join(t.dir, "blobs", "1_race.part");
+		const p2 = join(t.dir, "blobs", "2_race.part");
+		writeFileSync(p1, "x");
+		writeFileSync(p2, "x");
+		utimesSync(p1, old, old);
+		utimesSync(p2, old, old);
+		const { rmSync } = await import("node:fs");
+		const gcPromise = store.gc(Date.now());
+		rmSync(p2, { force: true });
+		await expect(gcPromise).resolves.toBeGreaterThanOrEqual(1);
 		await sleep(1);
 	});
 

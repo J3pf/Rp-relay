@@ -207,10 +207,16 @@ export class LongPollRegistry {
 				}
 				const conn = new LongPollConn(machine.id);
 				const session = new AgentSession(this.c, conn, machine);
-				current = { session, conn };
+				const next = { session, conn };
 				session.handle(env);
-				if (session.ready) this.sessions.set(agentId, current);
-				accepted++;
+				if (session.ready) {
+					current = next;
+					this.sessions.set(agentId, next);
+					accepted++;
+				} else {
+					current = undefined;
+					rejected++;
+				}
 				continue;
 			}
 			const target = current ?? this.byAgentHint(machine.id, env);
@@ -225,8 +231,22 @@ export class LongPollRegistry {
 		return { accepted, rejected };
 	}
 
-	private byAgentHint(machineId: string, _env: Envelope) {
-		const mine = [...this.sessions.values()].filter((s) => s.conn.machineId === machineId);
+	private byAgentHint(machineId: string, env: Envelope) {
+		const raw = env as unknown as {
+			agentId?: unknown;
+			d?: { agentId?: unknown } | null;
+			data?: { agentId?: unknown } | null;
+		};
+		const hint =
+			typeof raw.agentId === "string"
+				? raw.agentId
+				: typeof raw.d?.agentId === "string"
+					? raw.d.agentId
+					: typeof raw.data?.agentId === "string"
+						? raw.data.agentId
+						: null;
+		const mine = [...this.sessions.values()].filter((s) => s.conn.machineId === machineId && s.session.ready);
+		if (hint) return mine.find((s) => s.conn.agentId === hint);
 		return mine.length === 1 ? mine[0] : undefined;
 	}
 

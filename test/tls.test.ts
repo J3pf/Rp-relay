@@ -98,8 +98,8 @@ describe("servidor de desafío ACME HTTP-01", () => {
 		s.remove("tok-123");
 		const gone = await fetch(`http://127.0.0.1:${port}/.well-known/acme-challenge/tok-123`, { redirect: "manual" });
 		expect(gone.status).toBe(301);
-		const redir = await fetch(`http://127.0.0.1:${port}/v1/agents`, { redirect: "manual" });
-		expect(redir.headers.get("location")).toBe("https://relay.midominio.com/v1/agents");
+		const redir = await fetch(`http://127.0.0.1:${port}/v1/agents?state=open&limit=5`, { redirect: "manual" });
+		expect(redir.headers.get("location")).toBe("https://relay.midominio.com/v1/agents?state=open&limit=5");
 		await s.close();
 	});
 });

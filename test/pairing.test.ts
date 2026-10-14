@@ -130,4 +130,22 @@ describe("autenticación HTTP", () => {
 		expect(r.status).toBe(404);
 		expect(r.json.error.code).toBe("not_found");
 	});
+
+	it("tokens Bearer rpd_/rpm_ falsos comparten el cubo de rate-limit por IP; los válidos tienen su propio cubo", async () => {
+		const d = await pairDevice(t);
+		const r1 = await fetch(`${t.http}/v1/agents`, {
+			headers: { authorization: `Bearer rpd_fake_1_${"x".repeat(24)}` },
+		});
+		const r2 = await fetch(`${t.http}/v1/agents`, {
+			headers: { authorization: `Bearer rpd_fake_2_${"y".repeat(24)}` },
+		});
+		const rem1 = Number(r1.headers.get("x-ratelimit-remaining"));
+		const rem2 = Number(r2.headers.get("x-ratelimit-remaining"));
+		expect(rem2).toBe(rem1 - 1);
+
+		const rValid = await fetch(`${t.http}/v1/agents`, {
+			headers: { authorization: `Bearer ${d.deviceToken}` },
+		});
+		expect(Number(rValid.headers.get("x-ratelimit-remaining"))).toBe(599);
+	});
 });

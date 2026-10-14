@@ -53,7 +53,14 @@ export class AcmeChallengeServer {
 			}
 			const parsed = new URL(this.publicUrl);
 			const safePath = (req.url ?? "/").replace(/^\/+/, "/");
-			parsed.pathname = safePath;
+			const qIdx = safePath.indexOf("?");
+			if (qIdx >= 0) {
+				parsed.pathname = safePath.slice(0, qIdx) || "/";
+				parsed.search = safePath.slice(qIdx);
+			} else {
+				parsed.pathname = safePath;
+				parsed.search = "";
+			}
 			res.writeHead(301, { Location: parsed.toString() }).end();
 		});
 		await new Promise<void>((resolve, reject) => {

@@ -72,7 +72,7 @@ export class HostService {
 		const host = hub.hosts.get(machineId);
 		if (!host) return void reply(ErrorCode.HostOffline, "rp-host no está conectado en esa PC");
 
-		const id = env.id ?? ulid();
+		const id = ulid();
 		const timer = setTimeout(
 			() => {
 				this.pending.delete(id);

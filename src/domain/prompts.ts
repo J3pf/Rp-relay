@@ -152,6 +152,15 @@ export class PromptService {
 		return n;
 	}
 
+	/** Expira respuestas 'answered' sin entregar pasadas `before` y notifica a las apps. */
+	expireStaleAnswered(before: number): number {
+		const rows = this.c().repos.prompts.expireStaleAnswered(before);
+		for (const row of rows) {
+			this.afterClose(row, "timeout", null, null);
+		}
+		return rows.length;
+	}
+
 	/** Reconciliación con `agent.hello.openPrompts`. */
 	reconcile(agentId: string, incoming: PromptOpen[]): void {
 		const { repos } = this.c();

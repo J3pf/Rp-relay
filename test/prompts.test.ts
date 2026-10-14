@@ -240,12 +240,18 @@ describe("prompts: primera respuesta gana", () => {
 		for (const c of [back.client, app, direct]) c.close();
 	});
 
-	it("expiración por expiresAt: el relay manda prompt.cancel al plugin", async () => {
-		const { agent, app, direct } = await setup("p9");
+	it("expiración por expiresAt: no permite responder antes del sweep y el sweep manda prompt.cancel al plugin", async () => {
+		const { dev, agent, app, direct } = await setup("p9");
 		const p = promptBody(agent.agentId, { expiresAt: Date.now() + 50 });
 		agent.client.send("prompt.open", p);
 		await app.next("prompt.opened");
 		await sleep(120);
+		// antes de que corra sweep(), un intento de responder a un prompt ya caducado es rechazado
+		const lateBeforeSweep = await api(t, "POST", `/v1/prompts/${p.promptId}/answer`, dev.deviceToken, {
+			answer: { optionIds: ["0"] },
+		});
+		expect(lateBeforeSweep.status).toBe(409);
+		expect(lateBeforeSweep.json).toMatchObject({ ok: false, reason: "already_resolved" });
 		t.relay.ctx.prompts.sweep();
 		expect((await agent.client.next("prompt.cancel")).d).toMatchObject({ promptId: p.promptId });
 		expect((await app.next("prompt.resolved")).d).toMatchObject({ by: "timeout" });

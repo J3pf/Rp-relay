@@ -9,7 +9,16 @@ import { Repos } from "../src/db/repos/index.js";
 import { runRetention } from "../src/retention.js";
 import { watchdogIntervalMs } from "../src/util/sd.js";
 import { DAY } from "../src/util/time.js";
-import { cleanup, connectAgent, pairDevice, pairMachine, promptBody, sleep, startRelay } from "./helpers.js";
+import {
+	cleanup,
+	connectAgent,
+	connectApp,
+	pairDevice,
+	pairMachine,
+	promptBody,
+	sleep,
+	startRelay,
+} from "./helpers.js";
 
 describe("configuración", () => {
 	it("aplica valores por defecto del plan", () => {
@@ -97,11 +106,25 @@ describe("migraciones", () => {
 		expect(db.prepare("SELECT name FROM sqlite_master WHERE name='b'").get()).toBeUndefined();
 		rmSync(dir, { recursive: true, force: true });
 	});
-	it("relayId estable", () => {
-		const db = openDb(":memory:");
+	it("relayId estable y currentVersion funciona en modo readonly", () => {
+		const dir = mkdtempSync(join(tmpdir(), "rp-ro-"));
+		const file = join(dir, "ro.db");
+		const dbRw = openDb(file);
+		dbRw.close();
+		const dbRo0 = openDb(file, { readonly: true });
+		expect(currentVersion(dbRo0)).toBe(0);
+		dbRo0.close();
+
+		const db = openDb(file);
 		migrate(db);
 		const r = new Repos(db);
 		expect(r.meta.relayId()).toBe(r.meta.relayId());
+		db.close();
+
+		const dbRo1 = openDb(file, { readonly: true });
+		expect(currentVersion(dbRo1)).toBeGreaterThan(0);
+		dbRo1.close();
+		rmSync(dir, { recursive: true, force: true });
 	});
 });
 
@@ -176,7 +199,7 @@ describe("retención", () => {
 		}
 	});
 
-	it("no purga agentes con prompts abiertos... y expira respuestas 'answered' abandonadas", async () => {
+	it("no purga agentes con prompts abiertos... y expira respuestas 'answered' abandonadas notificando a las apps", async () => {
 		const t = await startRelay();
 		try {
 			const m = await pairMachine(t);
@@ -184,6 +207,7 @@ describe("retención", () => {
 			agent.client.send("prompt.open", promptBody(agent.agentId, { promptId: "ABAND" }));
 			await sleep(50);
 			const dev = await pairDevice(t);
+			const { client: app } = await connectApp(t, dev);
 			t.relay.ctx.prompts.answer("ABAND", { confirmed: true }, dev.deviceId);
 			agent.client.close();
 			await sleep(50);
@@ -191,7 +215,10 @@ describe("retención", () => {
 			expect(s.staleAnswered).toBe(1);
 			expect(s.agents).toBe(0); // tenía una respuesta pendiente: no se purga en esta pasada
 			expect(t.relay.ctx.repos.prompts.get("ABAND")!.state).toBe("expired");
+			const resolved = await app.next((e) => e.t === "prompt.resolved" && (e.d as any).promptId === "ABAND");
+			expect(resolved.d).toMatchObject({ promptId: "ABAND", by: "timeout" });
 			expect((await runRetention(t.relay.ctx, Date.now() + 9 * DAY)).agents).toBe(1); // ya sin prompts abiertos, sí
+			app.close();
 		} finally {
 			await t.stop();
 			cleanup(t);

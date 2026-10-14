@@ -30,7 +30,7 @@ export class HistoryService {
 		const canResume =
 			sinceSeq !== null &&
 			epoch === cur &&
-			((first !== null && sinceSeq >= first) ||
+			((first !== null && sinceSeq >= first - 1) ||
 				(first === null && snap !== undefined && sinceSeq >= snap.seq) ||
 				sinceSeq >= a.last_seq);
 		if (canResume) {
@@ -44,12 +44,12 @@ export class HistoryService {
 
 		let truncated = false;
 		const size = () => Buffer.byteLength(JSON.stringify({ entries, events }));
-		while (events.length > 0 && size() > FRAME_BUDGET) {
-			events = events.slice(Math.ceil(events.length / 4));
-			truncated = true;
-		}
 		while (entries.length > 0 && size() > FRAME_BUDGET) {
 			entries = entries.slice(Math.ceil(entries.length / 4));
+			truncated = true;
+		}
+		while (events.length > 0 && size() > FRAME_BUDGET) {
+			events = events.slice(Math.ceil(events.length / 4));
 			truncated = true;
 		}
 		const out: HistoryResult = {

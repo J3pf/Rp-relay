@@ -96,7 +96,10 @@ export class Hub {
 
 	/** Corta todo lo de una PC (revocación): agentes, host. */
 	closeMachine(machineId: string, code: number, reason: string): void {
-		for (const c of this.agentsOfMachine(machineId)) c.close(code, reason);
+		for (const c of this.agentsOfMachine(machineId)) {
+			this.unregisterAgent(c);
+			c.close(code, reason);
+		}
 		this.hosts.get(machineId)?.close(code, reason);
 	}
 	closeDevice(deviceId: string, code: number, reason: string): void {
