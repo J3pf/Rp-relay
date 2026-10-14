@@ -39,11 +39,22 @@ export class Publisher {
 		const { repos, hub } = this.c();
 		const m = repos.machines.get(machineId);
 		if (!m || m.revoked_at) return;
-		const info = m.host_info ? (JSON.parse(m.host_info) as { hostname?: string; roots?: string[] }) : {};
+		const info = m.host_info ? (JSON.parse(m.host_info) as any) : {};
 		const online = hub.hosts.has(machineId);
 		hub.broadcastApps(
 			envelope("hosts.update", {
-				upsert: [{ machineId, hostname: info.hostname ?? m.hostname ?? m.name, roots: info.roots ?? [], online }],
+				upsert: [
+					{
+						machineId,
+						hostname: info.hostname ?? m.hostname ?? m.name,
+						roots: info.roots ?? [],
+						online,
+						backends: info.backends ?? null,
+						defaultBackend: info.defaultBackend ?? null,
+						launchers: info.launchers ?? [],
+						defaultLauncher: info.defaultLauncher ?? null,
+					},
+				],
 				remove: [],
 			}),
 			{ mode: "foreground" },

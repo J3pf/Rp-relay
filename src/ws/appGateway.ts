@@ -116,7 +116,29 @@ export class AppSession {
 					relayName: config.relayName,
 					serverTime: Date.now(),
 				});
-				if (this.conn.mode === "direct") dispatcher.flushDirect(this.device.id, (m) => this.conn.send(m));
+				if (this.conn.mode === "direct") {
+					dispatcher.flushDirect(this.device.id, (m) => this.conn.send(m));
+				} else {
+					const hostUpdates = repos.machines
+						.list()
+						.filter((m) => m.host_info || hub.hosts.has(m.id))
+						.map((m) => {
+							const info = m.host_info ? (JSON.parse(m.host_info) as any) : {};
+							return {
+								machineId: m.id,
+								hostname: info.hostname ?? m.hostname ?? m.name,
+								roots: info.roots ?? [],
+								online: hub.hosts.has(m.id),
+								backends: info.backends ?? null,
+								defaultBackend: info.defaultBackend ?? null,
+								launchers: info.launchers ?? [],
+								defaultLauncher: info.defaultLauncher ?? null,
+							};
+						});
+					if (hostUpdates.length > 0) {
+						this.conn.send(envelope("hosts.update", { upsert: hostUpdates, remove: [] }));
+					}
+				}
 				return;
 			}
 			case "agent.subscribe": {
