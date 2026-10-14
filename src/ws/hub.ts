@@ -8,9 +8,11 @@ export interface HubLimits {
 
 /** Registro en memoria de las conexiones vivas (PLAN-RELAY §5.1). */
 export class Hub {
+	private static readonly EMPTY_SUBS: readonly AppConn[] = [];
 	readonly agents = new Map<string, AgentConn>();
 	readonly hosts = new Map<string, HostConn>();
 	readonly apps = new Set<AppConn>();
+	private subsByAgent = new Map<string, Set<AppConn>>();
 
 	constructor(private limits: HubLimits) {}
 
@@ -51,6 +53,32 @@ export class Hub {
 	}
 	removeApp(conn: AppConn): void {
 		this.apps.delete(conn);
+		for (const agentId of conn.subs) {
+			const set = this.subsByAgent.get(agentId);
+			if (set) {
+				set.delete(conn);
+				if (set.size === 0) this.subsByAgent.delete(agentId);
+			}
+		}
+	}
+	subscribe(conn: AppConn, agentId: string): void {
+		conn.subs.add(agentId);
+		if (conn.ready && conn.mode === "foreground") {
+			let set = this.subsByAgent.get(agentId);
+			if (!set) {
+				set = new Set();
+				this.subsByAgent.set(agentId, set);
+			}
+			set.add(conn);
+		}
+	}
+	unsubscribe(conn: AppConn, agentId: string): void {
+		conn.subs.delete(agentId);
+		const set = this.subsByAgent.get(agentId);
+		if (set) {
+			set.delete(conn);
+			if (set.size === 0) this.subsByAgent.delete(agentId);
+		}
 	}
 	appsOfDevice(deviceId: string, mode?: AppConn["mode"]): AppConn[] {
 		return [...this.apps].filter((a) => a.deviceId === deviceId && (!mode || a.mode === mode));
@@ -58,12 +86,14 @@ export class Hub {
 	readyApps(mode?: AppConn["mode"]): AppConn[] {
 		return [...this.apps].filter((a) => a.ready && (!mode || a.mode === mode));
 	}
-	subscribers(agentId: string): AppConn[] {
-		return [...this.apps].filter((a) => a.ready && a.mode === "foreground" && a.subs.has(agentId));
+	subscribers(agentId: string): Iterable<AppConn> {
+		return this.subsByAgent.get(agentId) ?? Hub.EMPTY_SUBS;
 	}
 	/** Dispositivos con la app en primer plano mirando ese agente. */
 	devicesViewing(agentId: string): Set<string> {
-		return new Set(this.subscribers(agentId).map((a) => a.deviceId));
+		const out = new Set<string>();
+		for (const a of this.subscribers(agentId)) out.add(a.deviceId);
+		return out;
 	}
 
 	/**

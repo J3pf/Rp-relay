@@ -10,10 +10,29 @@ export function openDb(path: string, opts: { readonly?: boolean } = {}): DB {
 	if (!opts.readonly) {
 		db.pragma("journal_mode = WAL");
 		db.pragma("synchronous = NORMAL");
+		db.pragma("temp_store = MEMORY");
+		db.pragma("cache_size = -64000");
 	}
 	db.pragma("foreign_keys = ON");
 	db.pragma("busy_timeout = 5000");
 	return db;
+}
+
+const stmtCache = new WeakMap<DB, Map<string, Database.Statement>>();
+
+/** Obtiene o compila un `PreparedStatement` cacheado por instancia de base de datos y sentencia SQL. */
+export function stmt(db: DB, sql: string): Database.Statement {
+	let map = stmtCache.get(db);
+	if (!map) {
+		map = new Map();
+		stmtCache.set(db, map);
+	}
+	let s = map.get(sql);
+	if (!s) {
+		s = db.prepare(sql);
+		map.set(sql, s);
+	}
+	return s;
 }
 
 export { Database };

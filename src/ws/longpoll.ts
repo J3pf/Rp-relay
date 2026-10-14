@@ -8,6 +8,7 @@ export class LongPollConn implements AgentConn {
 	instance: string | null = null;
 	epoch: string | null = null;
 	lastSeq = 0;
+	lastTouchAt = 0;
 	lastActivity = Date.now();
 	closed: { code: number; reason: string } | null = null;
 	private queue: Envelope[] = [];

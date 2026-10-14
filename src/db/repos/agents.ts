@@ -1,5 +1,5 @@
 import type { AgentHello } from "@j3pf/rp-protocol";
-import type { DB } from "../index.js";
+import { type DB, stmt } from "../index.js";
 
 export interface AgentRow {
 	id: string;
@@ -39,15 +39,16 @@ export interface AgentRow {
 const j = (v: unknown): string | null => (v === undefined || v === null ? null : JSON.stringify(v));
 
 export class AgentsRepo {
+	private deleteTx?: (id: string) => void;
 	constructor(private db: DB) {}
 	get(id: string): AgentRow | undefined {
-		return this.db.prepare("SELECT * FROM agents WHERE id=?").get(id) as AgentRow | undefined;
+		return stmt(this.db, "SELECT * FROM agents WHERE id=?").get(id) as AgentRow | undefined;
 	}
 	list(): AgentRow[] {
-		return this.db.prepare("SELECT * FROM agents ORDER BY last_seen_at DESC").all() as AgentRow[];
+		return stmt(this.db, "SELECT * FROM agents ORDER BY last_seen_at DESC").all() as AgentRow[];
 	}
 	byMachine(machineId: string): AgentRow[] {
-		return this.db.prepare("SELECT * FROM agents WHERE machine_id=?").all(machineId) as AgentRow[];
+		return stmt(this.db, "SELECT * FROM agents WHERE machine_id=?").all(machineId) as AgentRow[];
 	}
 	/** Inserta o actualiza el agente a partir de `agent.hello`; reinicia `last_seq` si cambia el epoch. */
 	upsertFromHello(
@@ -84,75 +85,75 @@ export class AgentsRepo {
 			h.transport ?? "ws",
 		];
 		if (!prev) {
-			this.db
-				.prepare(
-					`INSERT INTO agents(id,machine_id,kind,instance,epoch,session_id,session_name,session_file,launcher,herdr,gentle,gentle_mode,redacted,spawn_id,
+			stmt(
+				this.db,
+				`INSERT INTO agents(id,machine_id,kind,instance,epoch,session_id,session_name,session_file,launcher,herdr,gentle,gentle_mode,redacted,spawn_id,
 					 cwd,git_branch,git_dirty,model,thinking,status,pid,pi_version,plugin_version,features,transport,online,last_seq,first_seen_at,last_seen_at)
 					 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?,?)`,
-				)
-				.run(h.agentId, machineId, ...vals, now, now);
+			).run(h.agentId, machineId, ...vals, now, now);
 		} else {
-			this.db
-				.prepare(
-					`UPDATE agents SET kind=?,instance=?,epoch=?,session_id=?,session_name=?,session_file=?,launcher=?,herdr=?,gentle=?,gentle_mode=?,redacted=?,spawn_id=?,
+			stmt(
+				this.db,
+				`UPDATE agents SET kind=?,instance=?,epoch=?,session_id=?,session_name=?,session_file=?,launcher=?,herdr=?,gentle=?,gentle_mode=?,redacted=?,spawn_id=?,
 					 cwd=?,git_branch=?,git_dirty=?,model=?,thinking=?,status=?,status_detail=NULL,pid=?,pi_version=?,plugin_version=?,features=?,transport=?,
 					 online=1,last_seq=CASE WHEN ? THEN 0 ELSE last_seq END,last_seen_at=? WHERE id=?`,
-				)
-				.run(...vals, epochChanged ? 1 : 0, now, h.agentId);
+			).run(...vals, epochChanged ? 1 : 0, now, h.agentId);
 		}
 		return { row: this.get(h.agentId)!, epochChanged, previousSeq: prev && !epochChanged ? prev.last_seq : 0 };
 	}
 	setOffline(id: string, now: number): void {
-		this.db.prepare("UPDATE agents SET online=0, last_seen_at=? WHERE id=?").run(now, id);
+		stmt(this.db, "UPDATE agents SET online=0, last_seen_at=? WHERE id=?").run(now, id);
 	}
 	setAllOffline(now: number): number {
-		return this.db.prepare("UPDATE agents SET online=0, last_seen_at=? WHERE online=1").run(now).changes;
+		return stmt(this.db, "UPDATE agents SET online=0, last_seen_at=? WHERE online=1").run(now).changes;
 	}
 	touch(id: string, now: number): void {
-		this.db.prepare("UPDATE agents SET last_seen_at=? WHERE id=?").run(now, id);
+		stmt(this.db, "UPDATE agents SET last_seen_at=? WHERE id=?").run(now, id);
 	}
 	setSeq(id: string, seq: number): void {
-		this.db.prepare("UPDATE agents SET last_seq=MAX(last_seq, ?) WHERE id=?").run(seq, id);
+		stmt(this.db, "UPDATE agents SET last_seq=MAX(last_seq, ?) WHERE id=?").run(seq, id);
 	}
 	setPreview(id: string, preview: string): void {
-		this.db.prepare("UPDATE agents SET last_preview=? WHERE id=?").run(preview, id);
+		stmt(this.db, "UPDATE agents SET last_preview=? WHERE id=?").run(preview, id);
 	}
 	setStatus(id: string, status: string, detail: string | null): void {
-		this.db.prepare("UPDATE agents SET status=?, status_detail=? WHERE id=?").run(status, detail, id);
+		stmt(this.db, "UPDATE agents SET status=?, status_detail=? WHERE id=?").run(status, detail, id);
 	}
 	setStatuses(id: string, items: Record<string, string | null>, gentleMode: string | null): void {
-		this.db
-			.prepare("UPDATE agents SET statuses=?, gentle_mode=COALESCE(?, gentle_mode) WHERE id=?")
-			.run(JSON.stringify(items), gentleMode, id);
+		stmt(this.db, "UPDATE agents SET statuses=?, gentle_mode=COALESCE(?, gentle_mode) WHERE id=?").run(
+			JSON.stringify(items),
+			gentleMode,
+			id,
+		);
 	}
 	setSession(id: string, name: string | null): void {
-		this.db.prepare("UPDATE agents SET session_name=? WHERE id=?").run(name, id);
+		stmt(this.db, "UPDATE agents SET session_name=? WHERE id=?").run(name, id);
 	}
 	setModel(id: string, model: string | null): void {
-		this.db.prepare("UPDATE agents SET model=? WHERE id=?").run(model, id);
+		stmt(this.db, "UPDATE agents SET model=? WHERE id=?").run(model, id);
 	}
 	setThinking(id: string, thinking: string | null): void {
-		this.db.prepare("UPDATE agents SET thinking=? WHERE id=?").run(thinking, id);
+		stmt(this.db, "UPDATE agents SET thinking=? WHERE id=?").run(thinking, id);
 	}
 	resetEpoch(id: string, epoch: string): void {
-		this.db.prepare("UPDATE agents SET epoch=?, last_seq=0 WHERE id=?").run(epoch, id);
+		stmt(this.db, "UPDATE agents SET epoch=?, last_seq=0 WHERE id=?").run(epoch, id);
 	}
 	delete(id: string): void {
-		this.db.transaction(() => {
-			this.db.prepare("DELETE FROM events WHERE agent_id=?").run(id);
-			this.db.prepare("DELETE FROM snapshots WHERE agent_id=?").run(id);
-			this.db.prepare("DELETE FROM prompts WHERE agent_id=? AND state NOT IN ('open','answered')").run(id);
-			this.db.prepare("DELETE FROM agents WHERE id=?").run(id);
-		})();
+		this.deleteTx ??= this.db.transaction((agentId: string) => {
+			stmt(this.db, "DELETE FROM events WHERE agent_id=?").run(agentId);
+			stmt(this.db, "DELETE FROM snapshots WHERE agent_id=?").run(agentId);
+			stmt(this.db, "DELETE FROM prompts WHERE agent_id=? AND state NOT IN ('open','answered')").run(agentId);
+			stmt(this.db, "DELETE FROM agents WHERE id=?").run(agentId);
+		});
+		this.deleteTx(id);
 	}
 	/** Agentes offline desde antes de `before` (con sus eventos). */
 	purgeOffline(before: number): string[] {
 		const ids = (
-			this.db
-				.prepare(
-					"SELECT id FROM agents WHERE online=0 AND last_seen_at<? AND id NOT IN (SELECT agent_id FROM prompts WHERE state IN ('open','answered'))",
-				)
-				.all(before) as { id: string }[]
+			stmt(
+				this.db,
+				"SELECT id FROM agents WHERE online=0 AND last_seen_at<? AND id NOT IN (SELECT agent_id FROM prompts WHERE state IN ('open','answered'))",
+			).all(before) as { id: string }[]
 		).map((r) => r.id);
 		for (const id of ids) this.delete(id);
 		return ids;
@@ -162,9 +163,10 @@ export class AgentsRepo {
 	}
 	counts(): Map<string, { total: number; online: number }> {
 		const out = new Map<string, { total: number; online: number }>();
-		for (const r of this.db
-			.prepare("SELECT machine_id, COUNT(*) AS total, SUM(online) AS online FROM agents GROUP BY machine_id")
-			.all() as {
+		for (const r of stmt(
+			this.db,
+			"SELECT machine_id, COUNT(*) AS total, SUM(online) AS online FROM agents GROUP BY machine_id",
+		).all() as {
 			machine_id: string;
 			total: number;
 			online: number;

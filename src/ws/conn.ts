@@ -17,6 +17,7 @@ export interface AgentConn extends Conn {
 	epoch: string | null;
 	/** Último `seq` aceptado de la conexión actual (descarta reenvíos). */
 	lastSeq: number;
+	lastTouchAt?: number;
 }
 
 export interface AppConn extends Conn {

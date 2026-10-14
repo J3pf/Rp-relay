@@ -31,12 +31,14 @@ CREATE TABLE agents (
   last_seq INTEGER NOT NULL DEFAULT 0, last_preview TEXT,
   first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL);
 CREATE INDEX agents_machine ON agents(machine_id);
+CREATE INDEX IF NOT EXISTS agents_last_seen ON agents(last_seen_at DESC);
 
 CREATE TABLE events (                            -- sólo eventos "persistidos" (PROTOCOLO §4)
   agent_id TEXT NOT NULL, epoch TEXT NOT NULL, seq INTEGER NOT NULL,
   ts INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL,
   PRIMARY KEY (agent_id, epoch, seq));
 CREATE INDEX events_ts ON events(ts);
+CREATE INDEX IF NOT EXISTS events_agent_ts ON events(agent_id, ts, seq);
 
 CREATE TABLE snapshots (agent_id TEXT NOT NULL, epoch TEXT NOT NULL, seq INTEGER NOT NULL,
   payload TEXT NOT NULL, PRIMARY KEY(agent_id, epoch));
@@ -49,6 +51,7 @@ CREATE TABLE prompts (
   push_attempts INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX prompts_open ON prompts(state) WHERE state IN ('open','answered');
 CREATE INDEX prompts_agent ON prompts(agent_id);
+CREATE INDEX IF NOT EXISTS prompts_resolved_at ON prompts(resolved_at) WHERE state NOT IN ('open','answered');
 
 CREATE TABLE blobs (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, name TEXT, mime TEXT, size INTEGER NOT NULL,
   uploaded_by TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
@@ -63,3 +66,5 @@ CREATE TABLE push_outbox (
   body TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, acked_at INTEGER,
   PRIMARY KEY (push_id, device_id));
 CREATE INDEX push_outbox_pending ON push_outbox(device_id) WHERE acked_at IS NULL;
+CREATE INDEX IF NOT EXISTS push_outbox_ref ON push_outbox(ref_id) WHERE acked_at IS NULL;
+CREATE INDEX IF NOT EXISTS push_outbox_expires ON push_outbox(expires_at);

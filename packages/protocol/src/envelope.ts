@@ -26,15 +26,19 @@ export type ParseResult =
 	| { ok: true; env: Envelope }
 	| { ok: false; reason: "too_large" | "json" | "envelope"; message: string };
 
-/** Parsea un frame de texto en un sobre; no valida el cuerpo (eso lo hace `validateMessage`). */
-export function parseFrame(raw: string | Buffer, maxBytes = MAX_FRAME_BYTES): ParseResult {
-	const size = typeof raw === "string" ? Buffer.byteLength(raw) : raw.length;
-	if (size > maxBytes) return { ok: false, reason: "too_large", message: `frame de ${size} B supera ${maxBytes} B` };
+/** Parsea un frame de texto o un objeto ya decodificado en un sobre; no valida el cuerpo (eso lo hace `validateMessage`). */
+export function parseFrame(raw: string | Buffer | unknown, maxBytes = MAX_FRAME_BYTES): ParseResult {
 	let value: unknown;
-	try {
-		value = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
-	} catch {
-		return { ok: false, reason: "json", message: "JSON inválido" };
+	if (typeof raw === "string" || Buffer.isBuffer(raw)) {
+		const size = typeof raw === "string" ? Buffer.byteLength(raw) : raw.length;
+		if (size > maxBytes) return { ok: false, reason: "too_large", message: `frame de ${size} B supera ${maxBytes} B` };
+		try {
+			value = JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8"));
+		} catch {
+			return { ok: false, reason: "json", message: "JSON inválido" };
+		}
+	} else {
+		value = raw;
 	}
 	if (!envelopeCheck.Check(value)) {
 		const first = [...envelopeCheck.Errors(value)][0];

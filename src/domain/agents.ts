@@ -50,6 +50,7 @@ export class AgentService {
 		conn.instance = h.instance;
 		conn.epoch = h.epoch;
 		conn.lastSeq = epochChanged ? 0 : previousSeq;
+		conn.lastTouchAt = now;
 		repos.machines.touch(machine.id, now);
 		hub.registerAgent(conn as AgentConn & { agentId: string });
 
@@ -111,54 +112,62 @@ export class AgentService {
 		const e = ev.e as { type: string; [k: string]: unknown };
 		const now = Date.now();
 		let agentChanged = false;
+		const persisted = isPersistedEvent(e.type);
+		const shouldTouch = now - (conn.lastTouchAt ?? 0) >= 30_000;
 
-		if (isPersistedEvent(e.type)) {
-			repos.events.insert(agentId, ev.epoch, ev.seq, now, e.type, e);
-			repos.agents.setSeq(agentId, ev.seq);
+		const applyDbWrites = () => {
+			if (persisted) {
+				repos.events.insert(agentId, ev.epoch, ev.seq, now, e.type, e);
+				repos.agents.setSeq(agentId, ev.seq);
+			}
+			switch (e.type) {
+				case "message_end": {
+					const pv = previewOf(e);
+					if (pv) {
+						repos.agents.setPreview(agentId, pv);
+						agentChanged = true;
+					}
+					break;
+				}
+				case "session_info_changed": {
+					const name = (e.name ?? e.sessionName) as string | undefined;
+					if (typeof name === "string") {
+						repos.agents.setSession(agentId, name);
+						agentChanged = true;
+					}
+					break;
+				}
+				case "model_select": {
+					const m = modelOf(e.model);
+					if (m) {
+						repos.agents.setModel(agentId, m);
+						agentChanged = true;
+					}
+					break;
+				}
+				case "thinking_level_select": {
+					const lvl = (e.level ?? e.thinking) as string | undefined;
+					if (typeof lvl === "string") repos.agents.setThinking(agentId, lvl);
+					break;
+				}
+			}
+			if (shouldTouch) {
+				conn.lastTouchAt = now;
+				repos.agents.touch(agentId, now);
+			}
+		};
+
+		if (persisted) repos.db.transaction(applyDbWrites)();
+		else applyDbWrites();
+
+		if (e.type === "agent_settled") {
+			if (!e.aborted) dispatcher.settled(agentId, repos.agents.get(agentId)?.last_preview ?? null);
+		} else if (e.type === "terminal_wait") {
+			const title = typeof e.title === "string" ? e.title : null;
+			const active = e.active === true;
+			hub.broadcastApps(envelope("terminal_wait", { agentId, kind: e.kind as string | undefined, title, active }));
+			if (active) dispatcher.terminalWait(agentId, title);
 		}
-		switch (e.type) {
-			case "message_end": {
-				const pv = previewOf(e);
-				if (pv) {
-					repos.agents.setPreview(agentId, pv);
-					agentChanged = true;
-				}
-				break;
-			}
-			case "session_info_changed": {
-				const name = (e.name ?? e.sessionName) as string | undefined;
-				if (typeof name === "string") {
-					repos.agents.setSession(agentId, name);
-					agentChanged = true;
-				}
-				break;
-			}
-			case "model_select": {
-				const m = modelOf(e.model);
-				if (m) {
-					repos.agents.setModel(agentId, m);
-					agentChanged = true;
-				}
-				break;
-			}
-			case "thinking_level_select": {
-				const lvl = (e.level ?? e.thinking) as string | undefined;
-				if (typeof lvl === "string") repos.agents.setThinking(agentId, lvl);
-				break;
-			}
-			case "agent_settled": {
-				if (!e.aborted) dispatcher.settled(agentId, repos.agents.get(agentId)?.last_preview ?? null);
-				break;
-			}
-			case "terminal_wait": {
-				const title = typeof e.title === "string" ? e.title : null;
-				const active = e.active === true;
-				hub.broadcastApps(envelope("terminal_wait", { agentId, kind: e.kind as string | undefined, title, active }));
-				if (active) dispatcher.terminalWait(agentId, title);
-				break;
-			}
-		}
-		repos.agents.touch(agentId, now);
 
 		const out = envelope("agent.event", { agentId, epoch: ev.epoch, seq: ev.seq, e });
 		const droppable = isDroppableEvent(e.type) || e.type === "tool_execution_update";

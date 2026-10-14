@@ -140,6 +140,7 @@ export function handleAgentSocket(c: () => Ctx, socket: WebSocket, machine: Mach
 		instance: null as string | null,
 		epoch: null as string | null,
 		lastSeq: 0,
+		lastTouchAt: 0,
 	});
 	const session = new AgentSession(c, conn, machine);
 	const { log } = c();
@@ -192,7 +193,7 @@ export class LongPollRegistry {
 		// el lote puede mezclar agentes de la PC (un plugin = un agente); se agrupa por la sesión que corresponda
 		let current: { session: AgentSession; conn: LongPollConn } | undefined;
 		for (const raw of messages) {
-			const parsed = parseFrame(JSON.stringify(raw));
+			const parsed = parseFrame(raw !== null && typeof raw === "object" ? raw : JSON.stringify(raw));
 			if (!parsed.ok) {
 				rejected++;
 				continue;

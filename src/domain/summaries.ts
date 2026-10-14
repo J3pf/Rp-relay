@@ -54,7 +54,7 @@ export class Summaries {
 	agent(a: AgentRow, machine?: MachineRow, openByAgent?: Map<string, number>): AgentSummary {
 		const { repos, hub } = this.c();
 		const m = machine ?? repos.machines.get(a.machine_id)!;
-		const open = openByAgent ? (openByAgent.get(a.id) ?? 0) : (repos.prompts.countOpenByAgent().get(a.id) ?? 0);
+		const open = openByAgent ? (openByAgent.get(a.id) ?? 0) : repos.prompts.countOpenForAgent(a.id);
 		return {
 			agentId: a.id,
 			machineId: a.machine_id,

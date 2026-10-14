@@ -40,18 +40,28 @@ export class HistoryService {
 			from = snap.seq;
 		}
 		const rows = repos.events.since(agentId, cur, from, limit);
-		let events = rows.map((r) => ({ seq: r.seq, ts: r.ts, e: JSON.parse(r.payload) as unknown }));
+		const entryBytes = entries.map((e) => Buffer.byteLength(JSON.stringify(e), "utf8") + 1);
+		const rowBytes = rows.map((r) => Buffer.byteLength(r.payload, "utf8") + 32);
+		let totalBytes = 24;
+		for (const b of entryBytes) totalBytes += b;
+		for (const b of rowBytes) totalBytes += b;
 
+		let entryStart = 0;
+		let rowStart = 0;
 		let truncated = false;
-		const size = () => Buffer.byteLength(JSON.stringify({ entries, events }));
-		while (entries.length > 0 && size() > FRAME_BUDGET) {
-			entries = entries.slice(Math.ceil(entries.length / 4));
+		while (entryStart < entries.length && totalBytes > FRAME_BUDGET) {
+			totalBytes -= entryBytes[entryStart]!;
+			entryStart++;
 			truncated = true;
 		}
-		while (events.length > 0 && size() > FRAME_BUDGET) {
-			events = events.slice(Math.ceil(events.length / 4));
+		while (rowStart < rows.length && totalBytes > FRAME_BUDGET) {
+			totalBytes -= rowBytes[rowStart]!;
+			rowStart++;
 			truncated = true;
 		}
+		if (entryStart > 0) entries = entries.slice(entryStart);
+		const survivingRows = rowStart > 0 ? rows.slice(rowStart) : rows;
+		const events = survivingRows.map((r) => ({ seq: r.seq, ts: r.ts, e: JSON.parse(r.payload) as unknown }));
 		const out: HistoryResult = {
 			agentId,
 			epoch: cur,

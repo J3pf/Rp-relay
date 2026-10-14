@@ -45,9 +45,11 @@ export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 			// Token verificado con formato estándar (rpd_/rpm_); si no es válido, agrupar por IP
 			if (token.startsWith("rpd_")) {
 				const d = c().auth.device(req.headers);
+				req._rpDevice = d;
 				if (d.ok) return `dev:${d.row.id}`;
 			} else if (token.startsWith("rpm_")) {
 				const m = c().auth.machine(req.headers);
+				req._rpMachine = m;
 				if (m.ok) return `mac:${m.row.id}`;
 			}
 			return req.ip;

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { rename, rm } from "node:fs/promises";
+import { createReadStream, createWriteStream, mkdirSync, statSync } from "node:fs";
+import { readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -78,8 +78,9 @@ export class BlobStore {
 
 	open(id: string) {
 		const p = this.path(id);
-		if (!existsSync(p)) return null;
-		return { stream: createReadStream(p), size: statSync(p).size };
+		const st = statSync(p, { throwIfNoEntry: false });
+		if (!st) return null;
+		return { stream: createReadStream(p), size: st.size };
 	}
 
 	/** Borra blobs caducados (archivo + fila) y archivos huérfanos o `.part` viejos. */
@@ -91,10 +92,10 @@ export class BlobStore {
 			n++;
 		}
 		const known = new Set(this.repos.blobs.all().map((b) => b.id));
-		for (const f of readdirSync(this.dir)) {
+		for (const f of await readdir(this.dir)) {
 			const full = join(this.dir, f);
 			const id = f.replace(/\.part$/, "");
-			const st = statSync(full, { throwIfNoEntry: false });
+			const st = await stat(full).catch(() => null);
 			if (!st) continue;
 			const age = now - st.mtimeMs;
 			if ((f.endsWith(".part") && age > 3_600_000) || (!f.endsWith(".part") && !known.has(id) && age > 3_600_000)) {

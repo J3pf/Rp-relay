@@ -147,7 +147,7 @@ export class AppSession {
 				const a = repos.agents.get(d.agentId);
 				const m = a ? repos.machines.get(a.machine_id) : undefined;
 				if (!a || !m || m.revoked_at) throw new RelayError("not_found", "agente desconocido");
-				this.conn.subs.add(d.agentId);
+				hub.subscribe(this.conn, d.agentId);
 				const h = history.build(d.agentId, d.sinceSeq ?? null, d.epoch ?? null);
 				const { needsResync, ...body } = h;
 				this.reply(env, "agent.history", body);
@@ -155,7 +155,7 @@ export class AppSession {
 				return;
 			}
 			case "agent.unsubscribe":
-				this.conn.subs.delete(d.agentId);
+				hub.unsubscribe(this.conn, d.agentId);
 				if (env.id) this.reply(env, "ack");
 				return;
 			case "user.message": {

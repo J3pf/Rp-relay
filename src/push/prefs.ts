@@ -10,17 +10,28 @@ const DEFAULTS: Record<NotifyCategory, boolean> = {
 	terminal_wait: true,
 };
 
+const dtfCache = new Map<string, Intl.DateTimeFormat>();
+
+function getFormatter(tz: string): Intl.DateTimeFormat {
+	let fmt = dtfCache.get(tz);
+	if (!fmt) {
+		fmt = new Intl.DateTimeFormat("en-GB", {
+			hour: "2-digit",
+			minute: "2-digit",
+			hourCycle: "h23",
+			timeZone: tz,
+		});
+		dtfCache.set(tz, fmt);
+	}
+	return fmt;
+}
+
 function minutesOfDay(date: Date, tz?: string): number {
 	let hh = date.getUTCHours();
 	let mm = date.getUTCMinutes();
 	if (tz) {
 		try {
-			const parts = new Intl.DateTimeFormat("en-GB", {
-				hour: "2-digit",
-				minute: "2-digit",
-				hourCycle: "h23",
-				timeZone: tz,
-			}).formatToParts(date);
+			const parts = getFormatter(tz).formatToParts(date);
 			hh = Number(parts.find((p) => p.type === "hour")?.value ?? hh);
 			mm = Number(parts.find((p) => p.type === "minute")?.value ?? mm);
 		} catch {
