@@ -114,6 +114,23 @@ describe("rp-host (/ws/host)", () => {
 		expect(spawned.re).toBe(id3);
 		expect((spawned.d as any).spawnId).toBe("SP1");
 
+		// host.spawn con sessionId se enruta intacto
+		const idResume = app.send("host.spawn", {
+			machineId: m.machineId,
+			cwd: "/home/u/proyectos/api",
+			sessionId: "01JA0000000000000000000099",
+		});
+		const reqResume = await host.next("host.spawn");
+		expect((reqResume.d as any).sessionId).toBe("01JA0000000000000000000099");
+		host.send(
+			"host.spawned",
+			{ spawnId: "SP-RESUME", backend: "tmux", herdr: null, tmuxSession: null },
+			{ re: reqResume.id },
+		);
+		const spawnedResume = await app.next("host.spawned");
+		expect(spawnedResume.re).toBe(idResume);
+		expect((spawnedResume.d as any).spawnId).toBe("SP-RESUME");
+
 		// errores del host llegan a la app
 		const id4 = app.send("host.kill", { machineId: m.machineId, spawnId: "NOPE" });
 		const req4 = await host.next("host.kill");

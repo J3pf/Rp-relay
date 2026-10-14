@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { type Static, Type } from "@sinclair/typebox";
 import { Id, OptNullable } from "./common.js";
 
 export const HostHello = Type.Object({
@@ -45,7 +45,9 @@ export const HostSpawn = Type.Object({
 	),
 	herdrTarget: Type.Optional(HerdrTarget),
 	initialPrompt: Type.Optional(Type.String()),
+	sessionId: Type.Optional(Type.String()),
 });
+export type HostSpawn = Static<typeof HostSpawn>;
 export const HostSpawned = Type.Object({
 	spawnId: Id,
 	backend: Type.String(),
