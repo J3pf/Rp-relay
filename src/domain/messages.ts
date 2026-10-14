@@ -44,6 +44,8 @@ export class MessageService {
 			const blob = repos.blobs.get(att.blobId);
 			if (!blob || blob.expires_at <= Date.now())
 				throw new RelayError("not_found", `adjunto ${att.blobId} no existe o caducó`);
+			if (blob.uploaded_by !== deviceId)
+				throw new RelayError("unauthorized", `no tienes permisos sobre el adjunto ${att.blobId}`);
 			repos.blobs.grant(att.blobId, agent.machine_id);
 		}
 

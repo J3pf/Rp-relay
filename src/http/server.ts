@@ -39,9 +39,15 @@ export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 		global: true,
 		max: 600,
 		timeWindow: "1 minute",
-		// por token si lo hay (varios dispositivos tras la misma IP), si no por IP
-		keyGenerator: (req) =>
-			typeof req.headers.authorization === "string" ? req.headers.authorization.slice(-24) : req.ip,
+		keyGenerator: (req) => {
+			const auth = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
+			const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+			// Token verificado con formato estándar (rpd_/rpm_/admin); si no, agrupar por IP
+			if (token && (token.startsWith("rpd_") || token.startsWith("rpm_"))) {
+				return token.slice(-24);
+			}
+			return req.ip;
+		},
 		allowList: (req) => req.url === "/healthz",
 	});
 	await app.register(multipart, { limits: { fileSize: config.limits.blobMaxBytes + 1, files: 1, fields: 5 } });

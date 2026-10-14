@@ -134,6 +134,9 @@ export class AgentsRepo {
 	setThinking(id: string, thinking: string | null): void {
 		this.db.prepare("UPDATE agents SET thinking=? WHERE id=?").run(thinking, id);
 	}
+	resetEpoch(id: string, epoch: string): void {
+		this.db.prepare("UPDATE agents SET epoch=?, last_seq=0 WHERE id=?").run(epoch, id);
+	}
 	delete(id: string): void {
 		this.db.transaction(() => {
 			this.db.prepare("DELETE FROM events WHERE agent_id=?").run(id);

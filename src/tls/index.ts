@@ -51,8 +51,10 @@ export class AcmeChallengeServer {
 				res.writeHead(200, { "Content-Type": "text/plain" }).end(ka);
 				return;
 			}
-			const target = new URL(req.url ?? "/", this.publicUrl).toString();
-			res.writeHead(301, { Location: target }).end();
+			const parsed = new URL(this.publicUrl);
+			const safePath = (req.url ?? "/").replace(/^\/+/, "/");
+			parsed.pathname = safePath;
+			res.writeHead(301, { Location: parsed.toString() }).end();
 		});
 		await new Promise<void>((resolve, reject) => {
 			this.server!.once("error", reject);
@@ -102,17 +104,32 @@ export async function ensureAcmeCert(
 		accountKey,
 	});
 	const [key, csr] = await acme.crypto.createCsr({ commonName: tls.acme.domain });
-	log.info({ domain: tls.acme.domain }, "solicitando certificado ACME");
-	const cert: string = await client.auto({
-		csr,
-		email: tls.acme.email,
-		termsOfServiceAgreed: true,
-		challengePriority: ["http-01"],
-		challengeCreateFn: async (_a: unknown, c: { token: string }, keyAuth: string) => challenge.set(c.token, keyAuth),
-		challengeRemoveFn: async (_a: unknown, c: { token: string }) => challenge.remove(c.token),
-	});
-	writeFileSync(certFile, cert, { mode: 0o600 });
-	writeFileSync(keyFile, key, { mode: 0o600 });
+	let cert: string;
+	try {
+		cert = await client.auto({
+			csr,
+			email: tls.acme.email,
+			termsOfServiceAgreed: true,
+			challengePriority: ["http-01"],
+			challengeCreateFn: async (_a: unknown, c: { token: string }, keyAuth: string) => challenge.set(c.token, keyAuth),
+			challengeRemoveFn: async (_a: unknown, c: { token: string }) => challenge.remove(c.token),
+		});
+		writeFileSync(certFile, cert, { mode: 0o600 });
+		writeFileSync(keyFile, key, { mode: 0o600 });
+	} catch (e) {
+		if (existsSync(certFile) && existsSync(keyFile)) {
+			const existingCert = readFileSync(certFile);
+			try {
+				if (certExpiry(existingCert) > Date.now()) {
+					log.warn({ err: (e as Error).message }, "renovación ACME falló; utilizando certificado existente aún válido");
+					return { key: readFileSync(keyFile), cert: existingCert };
+				}
+			} catch {
+				// Certificado existente inválido, relanzar error original
+			}
+		}
+		throw e;
+	}
 	return { key: Buffer.from(key), cert: Buffer.from(cert) };
 }
 

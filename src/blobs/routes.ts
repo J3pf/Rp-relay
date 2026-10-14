@@ -19,6 +19,7 @@ export function registerBlobRoutes(app: FastifyInstance, c: () => Ctx, auth: Htt
 		const { repos, blobs } = c();
 		const row = repos.blobs.get(req.params.id);
 		if (!row || row.expires_at <= Date.now()) throw new RelayError("not_found", "adjunto no encontrado o caducado");
+		if (req.device && row.uploaded_by !== req.device.id) throw new RelayError("not_found", "adjunto no encontrado");
 		if (req.machine && !repos.blobs.granted(row.id, req.machine.id))
 			throw new RelayError("not_found", "adjunto no encontrado");
 		const f = blobs.open(row.id);

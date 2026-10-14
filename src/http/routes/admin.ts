@@ -22,9 +22,14 @@ export function registerAdmin(app: FastifyInstance, c: () => Ctx): void {
 		}
 		return adminToken;
 	};
-	const guard = async (req: { headers: Record<string, unknown> }) => {
+	const guard = async (req: { headers: Record<string, unknown>; raw?: { socket?: { remoteAddress?: string } } }) => {
 		if (req.headers["x-forwarded-for"] || req.headers.forwarded)
 			throw new RelayError("unauthorized", "no disponible a través de proxy");
+		const remote = req.raw?.socket?.remoteAddress;
+		if (remote) {
+			const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+			if (!isLoopback) throw new RelayError("unauthorized", "acceso administrativo restringido a loopback");
+		}
 		const tok = load();
 		const given = bearer(req.headers.authorization as string | undefined);
 		if (!tok || !given || !safeEqual(tok, given))

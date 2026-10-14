@@ -94,8 +94,9 @@ export class AgentService {
 	}
 
 	private switchEpoch(conn: AgentConn, epoch: string): void {
+		if (!conn.agentId) return;
 		const { repos } = this.c();
-		repos.db.prepare("UPDATE agents SET epoch=?, last_seq=0 WHERE id=?").run(epoch, conn.agentId);
+		repos.agents.resetEpoch(conn.agentId, epoch);
 		conn.epoch = epoch;
 		conn.lastSeq = 0;
 	}
