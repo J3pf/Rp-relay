@@ -6,6 +6,30 @@ export const OptNullable = <T extends TSchema>(t: T) => Type.Optional(Type.Union
 export const Id = Type.String({ minLength: 1, maxLength: 256 });
 export const Ts = Type.Number();
 
+export const QuotaWindow = Type.Object({
+	id: Type.String(),
+	label: OptNullable(Type.String()),
+	usedPercent: Type.Number(),
+	remainingPercent: Type.Number(),
+	resetsAt: OptNullable(Type.String()),
+	resetsInSec: OptNullable(Type.Integer()),
+	note: OptNullable(Type.String()),
+});
+export type QuotaWindow = Static<typeof QuotaWindow>;
+
+export const MachineQuota = Type.Object({
+	family: Type.String(),
+	label: Type.String(),
+	plan: OptNullable(Type.String()),
+	ok: Type.Boolean(),
+	notConfigured: Type.Optional(Type.Boolean()),
+	error: OptNullable(Type.String()),
+	primaryWindowId: OptNullable(Type.String()),
+	windows: Type.Array(QuotaWindow),
+	updatedAt: OptNullable(Type.String()),
+});
+export type MachineQuota = Static<typeof MachineQuota>;
+
 export const Option = Type.Object({
 	id: Type.String(),
 	label: Type.String(),

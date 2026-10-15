@@ -1,5 +1,5 @@
 import { type Static, Type } from "@sinclair/typebox";
-import { Id, OptNullable } from "./common.js";
+import { Id, MachineQuota, OptNullable } from "./common.js";
 
 export const HostHello = Type.Object({
 	machineId: Id,
@@ -14,7 +14,14 @@ export const HostHello = Type.Object({
 	defaultBackend: Type.Optional(Type.String()),
 	launchers: Type.Array(Type.String()),
 	defaultLauncher: Type.Optional(Type.String()),
+	quotas: Type.Optional(Type.Array(MachineQuota)),
 });
+export type HostHello = Static<typeof HostHello>;
+
+export const HostQuotas = Type.Object({
+	quotas: Type.Array(MachineQuota),
+});
+export type HostQuotas = Static<typeof HostQuotas>;
 
 export const HostListDirs = Type.Object({ machineId: Id, path: Type.String() });
 export const HostDirs = Type.Object({ path: Type.String(), dirs: Type.Array(Type.String()) });

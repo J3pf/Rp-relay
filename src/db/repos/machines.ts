@@ -10,6 +10,7 @@ export interface MachineRow {
 	icon: string | null;
 	quiet_hours: string | null;
 	host_info: string | null;
+	quotas: string | null;
 	created_at: number;
 	last_seen_at: number | null;
 	revoked_at: number | null;
@@ -73,5 +74,8 @@ export class MachinesRepo {
 	}
 	setHostInfo(id: string, info: unknown | null): void {
 		stmt(this.db, "UPDATE machines SET host_info=? WHERE id=?").run(info === null ? null : JSON.stringify(info), id);
+	}
+	setQuotas(id: string, quotas: unknown | null): void {
+		stmt(this.db, "UPDATE machines SET quotas=? WHERE id=?").run(quotas === null ? null : JSON.stringify(quotas), id);
 	}
 }

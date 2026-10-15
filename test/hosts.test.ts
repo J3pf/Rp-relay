@@ -267,4 +267,94 @@ describe("rp-host (/ws/host)", () => {
 
 		for (const c of [host, app1, app2]) c.close();
 	});
+
+	it("host.hello con quotas se proyecta en machines.update y en app.welcome", async () => {
+		const dev = await pairDevice(t);
+		const m = await pairMachine(t);
+		const { client: app } = await connectApp(t, dev);
+
+		const sampleQuotas = [
+			{
+				family: "codex",
+				label: "Codex (Pi)",
+				plan: "plus",
+				ok: true,
+				notConfigured: false,
+				error: null,
+				primaryWindowId: "5h",
+				windows: [
+					{
+						id: "5h",
+						label: "5h window",
+						usedPercent: 20.0,
+						remainingPercent: 80.0,
+						resetsAt: "2026-10-15T10:00:00.000Z",
+						resetsInSec: 10000,
+						note: null,
+					},
+				],
+				updatedAt: "2026-10-15T05:00:00.000Z",
+			},
+		];
+
+		const host = await Client.connect(`${t.ws}/ws/host`, m.machineToken);
+		host.send("host.hello", { ...hostHello(m.machineId), quotas: sampleQuotas });
+
+		const mu = await app.next((e) => e.t === "machines.update" && (e.d as any).upsert[0]?.machineId === m.machineId);
+		const updatedMachine = (mu.d as any).upsert[0];
+		expect(updatedMachine.quotas).toEqual(sampleQuotas);
+
+		// Nueva app al conectar recibe las cuotas en app.welcome
+		const dev2 = await pairDevice(t, "App2");
+		const { client: app2, welcome } = await connectApp(t, dev2);
+		const welcomeMachine = (welcome.d as any).machines.find((x: any) => x.machineId === m.machineId);
+		expect(welcomeMachine.quotas).toEqual(sampleQuotas);
+
+		host.close();
+		app.close();
+		app2.close();
+	});
+
+	it("host.quotas actualiza dinámicamente las cuotas y difunde machines.update", async () => {
+		const dev = await pairDevice(t);
+		const m = await pairMachine(t);
+		const host = await connectHost(m);
+		const { client: app } = await connectApp(t, dev);
+
+		const updatedQuotas = [
+			{
+				family: "antigravity",
+				label: "Antigravity (Pi)",
+				plan: null,
+				ok: true,
+				notConfigured: false,
+				error: null,
+				primaryWindowId: "gemini-5h",
+				windows: [
+					{
+						id: "gemini-5h",
+						label: "Gemini 5h",
+						usedPercent: 45.0,
+						remainingPercent: 55.0,
+						resetsAt: "2026-10-15T12:00:00.000Z",
+						resetsInSec: 14000,
+						note: "45% used",
+					},
+				],
+				updatedAt: "2026-10-15T06:00:00.000Z",
+			},
+		];
+
+		host.send("host.quotas", { quotas: updatedQuotas });
+
+		const mu = await app.next((e) => e.t === "machines.update" && (e.d as any).upsert[0]?.machineId === m.machineId);
+		expect((mu.d as any).upsert[0].quotas).toEqual(updatedQuotas);
+
+		// Persistido en base de datos
+		const row = t.relay.ctx.repos.machines.get(m.machineId);
+		expect(JSON.parse(row!.quotas!)).toEqual(updatedQuotas);
+
+		host.close();
+		app.close();
+	});
 });

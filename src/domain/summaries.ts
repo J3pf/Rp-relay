@@ -1,4 +1,4 @@
-import type { AgentSummary, MachineSummary, Prompt, PromptOpen } from "@j3pf/rp-protocol";
+import type { AgentSummary, MachineQuota, MachineSummary, Prompt, PromptOpen } from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
 import type { AgentRow, MachineRow, PromptRow } from "../db/repos/index.js";
 
@@ -37,6 +37,10 @@ export class Summaries {
 		for (const a of repos.agents.byMachine(m.id)) open += ob.get(a.id) ?? 0;
 		const hostOnline = hub.hosts.has(m.id);
 		const agentOnline = hub.agentsOfMachine(m.id).length > 0;
+		const quotas =
+			(m.quotas ? parse<MachineQuota[]>(m.quotas) : null) ??
+			parse<{ quotas?: MachineQuota[] }>(m.host_info)?.quotas ??
+			undefined;
 		return {
 			machineId: m.id,
 			name: m.name,
@@ -48,6 +52,7 @@ export class Summaries {
 			openPromptCount: open,
 			hostOnline,
 			relayId: repos.meta.relayId(),
+			quotas: quotas ?? undefined,
 		};
 	}
 
@@ -83,7 +88,7 @@ export class Summaries {
 		const { repos } = this.c();
 		const a = repos.agents.get(p.agent_id);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
-		const body = JSON.parse(p.payload) as PromptOpen;
+		const body = parse<PromptOpen>(p.payload) ?? ({} as PromptOpen);
 		return {
 			...body,
 			agentId: p.agent_id,

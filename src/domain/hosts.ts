@@ -1,4 +1,11 @@
-import { type AgentHello, type Envelope, ErrorCode, envelope, errorEnvelope } from "@j3pf/rp-protocol";
+import {
+	type AgentHello,
+	type Envelope,
+	ErrorCode,
+	envelope,
+	errorEnvelope,
+	type MachineQuota,
+} from "@j3pf/rp-protocol";
 import { ulid } from "ulid";
 import type { Ctx } from "../context.js";
 import type { AppConn, HostConn } from "../ws/conn.js";
@@ -37,13 +44,27 @@ export class HostService {
 	constructor(private c: () => Ctx) {}
 
 	// ---- conexión del host ----
-	onHostHello(conn: HostConn, hello: { hostname: string; roots: string[]; [k: string]: unknown }): void {
+	onHostHello(
+		conn: HostConn,
+		hello: { hostname: string; roots: string[]; quotas?: MachineQuota[]; [k: string]: unknown },
+	): void {
 		const { repos, hub, publisher } = this.c();
 		this.c().log.info({ machineId: conn.machineId, hostname: hello.hostname }, "rp-host conectado");
 		repos.machines.setHostInfo(conn.machineId, hello);
+		if (Array.isArray(hello.quotas)) {
+			repos.machines.setQuotas(conn.machineId, hello.quotas);
+		}
 		repos.machines.touch(conn.machineId, Date.now());
 		hub.registerHost(conn);
 		publisher.host(conn.machineId);
+		publisher.machine(conn.machineId);
+	}
+
+	onHostQuotas(conn: HostConn, body: { quotas: MachineQuota[] }): void {
+		const { repos, publisher } = this.c();
+		this.c().log.info({ machineId: conn.machineId, count: body.quotas?.length ?? 0 }, "rp-host actualizó cuotas");
+		repos.machines.setQuotas(conn.machineId, body.quotas);
+		repos.machines.touch(conn.machineId, Date.now());
 		publisher.machine(conn.machineId);
 	}
 

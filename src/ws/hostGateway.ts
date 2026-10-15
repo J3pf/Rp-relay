@@ -3,6 +3,7 @@ import {
 	type Envelope,
 	ErrorCode,
 	errorEnvelope,
+	type MachineQuota,
 	MIN_PROTOCOL_VERSION,
 	PROTOCOL_VERSION,
 	parseFrame,
@@ -51,7 +52,7 @@ export function handleHostSocket(c: () => Ctx, socket: WebSocket, machine: Machi
 			return;
 		}
 		if (env.t === "host.hello") {
-			const h = env.d as { machineId: string; hostname: string; roots: string[] };
+			const h = env.d as { machineId: string; hostname: string; roots: string[]; quotas?: MachineQuota[] };
 			if (h.machineId !== machine.id) {
 				conn.send(errorEnvelope(ErrorCode.Unauthorized, "machineId no coincide con el token", env.id));
 				conn.close(CloseCode.Unauthorized, "machine mismatch");
@@ -59,6 +60,10 @@ export function handleHostSocket(c: () => Ctx, socket: WebSocket, machine: Machi
 			}
 			conn.ready = true;
 			hosts.onHostHello(conn, h);
+			return;
+		}
+		if (env.t === "host.quotas") {
+			hosts.onHostQuotas(conn, env.d as { quotas: MachineQuota[] });
 			return;
 		}
 		hosts.onHostReply(conn, env);

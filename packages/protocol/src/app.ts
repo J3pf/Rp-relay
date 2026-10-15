@@ -4,6 +4,7 @@ import {
 	Answer,
 	Entry,
 	Id,
+	MachineQuota,
 	OptNullable,
 	PiEvent,
 	Prompt,
@@ -23,6 +24,7 @@ export const MachineSummary = Type.Object({
 	openPromptCount: Type.Integer({ minimum: 0 }),
 	hostOnline: Type.Boolean(),
 	relayId: Type.Optional(Type.String()),
+	quotas: Type.Optional(Type.Array(MachineQuota)),
 });
 export type MachineSummary = Static<typeof MachineSummary>;
 

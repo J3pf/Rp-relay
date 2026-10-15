@@ -314,7 +314,9 @@ describe("copias de seguridad y restauración", () => {
 		const mdir = mkdtempSync(join(tmpdir(), "rp-mig-"));
 		const { readMigrations } = await import("../src/db/migrate.js");
 		for (const mig of readMigrations()) writeFileSync(join(mdir, mig.name), mig.sql);
-		writeFileSync(join(mdir, "0002_extra.sql"), "CREATE TABLE extra (id INTEGER PRIMARY KEY);");
+		const nextVer = Math.max(...readMigrations().map((m) => m.version)) + 1;
+		const nextName = `${String(nextVer).padStart(4, "0")}_extra.sql`;
+		writeFileSync(join(mdir, nextName), "CREATE TABLE extra (id INTEGER PRIMARY KEY);");
 		const db = openDb(join(t.dir, "relay.db"));
 		let backedUp = false;
 		const applied = migrate(db, {
@@ -325,7 +327,7 @@ describe("copias de seguridad y restauración", () => {
 			},
 		});
 		db.close();
-		expect(applied).toEqual([2]);
+		expect(applied).toEqual([nextVer]);
 		expect(backedUp).toBe(true);
 		expect(readdirSync(join(t.dir, "backups")).length).toBe(1);
 		void mkdirSync;

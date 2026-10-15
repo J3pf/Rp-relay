@@ -1,0 +1,30 @@
+{
+  "v": 1,
+  "t": "host.quotas",
+  "ts": 1760342400000,
+  "d": {
+    "quotas": [
+      {
+        "family": "codex",
+        "label": "Codex (Pi)",
+        "plan": "plus",
+        "ok": true,
+        "notConfigured": false,
+        "error": null,
+        "primaryWindowId": "5h",
+        "windows": [
+          {
+            "id": "5h",
+            "label": "5h window",
+            "usedPercent": 25.5,
+            "remainingPercent": 74.5,
+            "resetsAt": "2026-10-15T10:43:17.000Z",
+            "resetsInSec": 18002,
+            "note": null
+          }
+        ],
+        "updatedAt": "2026-10-15T05:43:14.794Z"
+      }
+    ]
+  }
+}
