@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "t": "agent.event",
+  "ts": 1760342400000,
+  "d": {
+    "epoch": "01JA0000000000000000000E01",
+    "seq": 59,
+    "e": {
+      "type": "todo_update",
+      "tasks": [
+        {
+          "id": "1",
+          "title": "Configurar DB",
+          "status": "done",
+          "note": "completado"
+        },
+        {
+          "id": "2",
+          "title": "Implementar endpoints",
+          "status": "in_progress",
+          "note": "en desarrollo"
+        }
+      ]
+    }
+  }
+}

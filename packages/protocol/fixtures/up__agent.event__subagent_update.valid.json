@@ -1,0 +1,32 @@
+{
+  "v": 1,
+  "t": "agent.event",
+  "ts": 1760342400000,
+  "d": {
+    "epoch": "01JA0000000000000000000E01",
+    "seq": 60,
+    "e": {
+      "type": "subagent_update",
+      "taskId": "task-001",
+      "agent": "gentle-ai-worker",
+      "label": "Implementar módulo",
+      "status": "running",
+      "model": "claude-sonnet-4",
+      "thinking": "high",
+      "startedAt": 1760342390000,
+      "endedAt": null,
+      "durationMs": 10000,
+      "turns": 2,
+      "toolCalls": 4,
+      "tokens": {
+        "prompt": 1200,
+        "completion": 350,
+        "total": 1550
+      },
+      "cost": 0.015,
+      "error": null,
+      "result": null,
+      "tools": ["bash", "read", "edit"]
+    }
+  }
+}

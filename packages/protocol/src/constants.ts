@@ -44,6 +44,8 @@ export const PERSISTED_EVENT_TYPES = [
 	"model_select",
 	"thinking_level_select",
 	"session_compact",
+	"todo_update",
+	"subagent_update",
 ] as const;
 const persisted = new Set<string>(PERSISTED_EVENT_TYPES);
 export const isPersistedEvent = (type: string): boolean => persisted.has(type);

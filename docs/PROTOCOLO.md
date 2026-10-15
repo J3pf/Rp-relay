@@ -97,6 +97,8 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 | `tool_execution_end` | sí; `result.content` texto truncado a **32 KiB** con marca `truncated:true` | sí |
 | `session_info_changed`, `model_select`, `thinking_level_select` | sí | sí |
 | `session_compact` | sí (sólo resumen) | sí |
+| `todo_update` | sí (lista de tareas del agente) | sí |
+| `subagent_update` | sí (métrica y estado de subagente) | sí |
 | `ui_prompt_start/end` con `kind:"custom"|"editor"` | sí, como `{type:"terminal_wait", kind, title, active:bool}` | no |
 
 ### `agent.status` — `{ "status":"working", "detail":"bash: npm test" }` (cambios de estado derivados)

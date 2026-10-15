@@ -208,6 +208,63 @@ describe("agentes, apps y eventos", () => {
 		app2.close();
 	});
 
+	it("persistencia de eventos todo_update y subagent_update en SQLite y entrega en agent.history", async () => {
+		const dev = await pairDevice(t);
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "s-todos-subagents");
+		agent.client.send("agent.snapshot", {
+			epoch: agent.hello.epoch,
+			seq: 0,
+			entries: [{ eid: "e0", kind: "user", at: 1, msg: { role: "user", content: "iniciar" } }],
+		});
+
+		const todoPayload = {
+			type: "todo_update",
+			tasks: [
+				{ id: "1", title: "Configurar DB", status: "done", note: "listo" },
+				{ id: "2", title: "Migración", status: "in_progress", note: "en curso" },
+			],
+		};
+
+		const subagentPayload = {
+			type: "subagent_update",
+			taskId: "task-101",
+			agent: "worker",
+			label: "Worker task",
+			status: "running",
+			model: "claude-sonnet-4",
+			thinking: "high",
+			startedAt: 1700000000000,
+			endedAt: null,
+			durationMs: 12500,
+			turns: 3,
+			toolCalls: 5,
+			tokens: { prompt: 1500, completion: 450, total: 1950 },
+			cost: 0.02,
+			error: null,
+			result: null,
+			tools: ["bash", "read", "edit"],
+		};
+
+		agent.event(todoPayload);
+		agent.event(subagentPayload);
+		await sleep(50);
+
+		// Conectar app y suscribirse desde el inicio
+		const { client: app } = await connectApp(t, dev);
+		const subId = app.send("agent.subscribe", { agentId: agent.agentId, sinceSeq: null, epoch: null });
+		const hist = await app.next((e) => e.t === "agent.history");
+		expect(hist.re).toBe(subId);
+		const h = hist.d as any;
+
+		expect(h.events.map((e: any) => e.e.type)).toEqual(["todo_update", "subagent_update"]);
+		expect(h.events[0].e).toEqual(todoPayload);
+		expect(h.events[1].e).toEqual(subagentPayload);
+
+		agent.client.close();
+		app.close();
+	});
+
 	it("reenvío de eventos con seq repetido se descarta (al menos una vez → sin duplicados)", async () => {
 		const dev = await pairDevice(t);
 		const m = await pairMachine(t);

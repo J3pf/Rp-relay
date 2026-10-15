@@ -227,3 +227,58 @@ export const NotifyCategoryMap = Type.Partial(
 		terminal_wait: Type.Boolean(),
 	}),
 );
+
+export const TodoTask = Type.Object({
+	id: Type.Union([Type.String(), Type.Number()]),
+	title: Type.String(),
+	status: Type.Union([
+		Type.Literal("pending"),
+		Type.Literal("in_progress"),
+		Type.Literal("blocked"),
+		Type.Literal("done"),
+		Type.Literal("dropped"),
+		Type.String(),
+	]),
+	note: OptNullable(Type.String()),
+});
+export type TodoTask = Static<typeof TodoTask>;
+
+export const TodoUpdateEvent = Type.Object({
+	type: Type.Literal("todo_update"),
+	tasks: Type.Array(TodoTask),
+});
+export type TodoUpdateEvent = Static<typeof TodoUpdateEvent>;
+
+export const SubagentTokens = Type.Object({
+	prompt: Type.Optional(Type.Number()),
+	completion: Type.Optional(Type.Number()),
+	total: Type.Optional(Type.Number()),
+});
+export type SubagentTokens = Static<typeof SubagentTokens>;
+
+export const SubagentUpdateEvent = Type.Object({
+	type: Type.Literal("subagent_update"),
+	taskId: Type.String(),
+	agent: Type.String(),
+	label: Type.Optional(Type.String()),
+	status: Type.Union([
+		Type.Literal("running"),
+		Type.Literal("done"),
+		Type.Literal("error"),
+		Type.Literal("stopped"),
+		Type.String(),
+	]),
+	model: OptNullable(Type.String()),
+	thinking: OptNullable(Type.String()),
+	startedAt: OptNullable(Type.Number()),
+	endedAt: OptNullable(Type.Number()),
+	durationMs: OptNullable(Type.Number()),
+	turns: OptNullable(Type.Integer()),
+	toolCalls: OptNullable(Type.Integer()),
+	tokens: OptNullable(SubagentTokens),
+	cost: OptNullable(Type.Number()),
+	error: OptNullable(Type.String()),
+	result: OptNullable(Type.Unknown()),
+	tools: OptNullable(Type.Array(Type.String())),
+});
+export type SubagentUpdateEvent = Static<typeof SubagentUpdateEvent>;
