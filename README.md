@@ -3,7 +3,7 @@
 Relay autoalojable (Ubuntu Server) que conecta tus agentes [Pi](https://github.com/earendil-works/pi) con la app Android
 **RP**: lista de agentes en vivo, chat, adjuntos y **notificaciones push de preguntas/autorizaciones respondibles desde el móvil**.
 
-> Estado: **v0.2.0 publicado**: relay completo (Fastify + ws + SQLite).
+> Estado: **v0.3.0 publicado**: relay completo (Fastify + ws + SQLite).
 > Probado e integrado de extremo a extremo con los repos hermanos [`rp-plugin`](https://github.com/j3pf/rp-plugin) (Pi) y [`rp-app`](https://github.com/j3pf/rp-app) (Android).
 
 | Documento | Contenido |

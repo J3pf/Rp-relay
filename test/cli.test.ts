@@ -206,7 +206,7 @@ describe("CLI sin el relay en marcha", () => {
 
 	it("migrate, version, ayuda y comando desconocido", async () => {
 		expect((await cli(["migrate"], env)).out).toContain("Sin migraciones pendientes");
-		expect((await cli(["version"], env)).out.trim()).toBe("0.2.0");
+		expect((await cli(["version"], env)).out.trim()).toBe("0.3.0");
 		expect((await cli(["help"])).out).toContain("Uso: rp-relay");
 		const u = await cli(["frobnicar"]);
 		expect(u.code).toBe(2);
