@@ -122,7 +122,7 @@ describe("autenticación HTTP", () => {
 
 	it("healthz", async () => {
 		const r = await api(t, "GET", "/healthz");
-		expect(r.json).toMatchObject({ ok: true, version: "0.3.0" });
+		expect(r.json).toMatchObject({ ok: true, version: "0.4.0" });
 	});
 
 	it("ruta inexistente → 404 con formato de error", async () => {
