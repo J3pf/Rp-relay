@@ -24,9 +24,9 @@ Canonical contract in Rp-relay: packages/protocol, docs/PROTOCOLO.md, and fixtur
 
 - T1 [done] (S1, S2, S3, S4, S5, S6): TypeBox schemas in packages/protocol, docs/PROTOCOLO.md update, contract fixtures, early commit, and intercom notification to 01a14214-32a8. Addressed F1-F7 review feedback. Route: gentle-ai-worker. Commit: 75cffa7.
 - T2 [done] (S7): SQLite migration 0003_comms.sql, comms repo, upsert by (agent_id, comm_id), maintenance retention pruning (7 days, max 20k rows). Route: gentle-ai-worker. Commit: 75cffa7.
-- T3 [done] (S8): Peer resolution engine: exact session ID match, prefix >= 8 chars, session name match, machine affinity, replyTo comm lookup, re-resolution on connect. Route: gentle-ai-worker. Commit: pending.
-- T4 [in_progress] (S9): Pure topology engine: deduplication, initiation scoring, orchestrator detection, parentAgentId tree derivation, connected components, cwd fallback, pendingAsk, todos derivation, subagent state extraction. Route: gentle-ai-worker. Commit: pending.
-- T5 [pending] (S10): WS mesh.* subscription handling, coalescing <= 2/s, per-machine cache invalidation, live mesh.comm broadcast, redaction handling. Route: gentle-ai-worker. Commit: pending.
+- T3 [done] (S8): Peer resolution engine: exact session ID match, prefix >= 8 chars, session name match, machine affinity, replyTo comm lookup, re-resolution on connect. Route: gentle-ai-worker. Commit: 59c8f41.
+- T4 [done] (S9): Pure topology engine: deduplication, initiation scoring, orchestrator detection, parentAgentId tree derivation, connected components, cwd fallback, pendingAsk, todos derivation, subagent state extraction. Route: gentle-ai-worker. Commit: pending.
+- T5 [in_progress] (S10): WS mesh.* subscription handling, coalescing <= 2/s, per-machine cache invalidation, live mesh.comm broadcast, redaction handling. Route: gentle-ai-worker. Commit: pending.
 - T6 [pending] (S11): HTTP routes for GET /v1/mesh, GET /v1/mesh/conversation, GET /v1/mesh/agents/:agentId/comms with device auth and validation. Route: gentle-ai-worker. Commit: pending.
 - T7 [pending] (S12): Full test suite integration (topology unit tests, WS client integration, HTTP routes, migration, load smoke test, npm run check). Route: gentle-ai-worker. Commit: pending.
 - T8 [pending] (S13): Documentation update in README.md and docs/INSTALACION.md in Spanish. Route: gentle-ai-worker. Commit: pending.
