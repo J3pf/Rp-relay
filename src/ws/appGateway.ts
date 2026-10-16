@@ -166,7 +166,7 @@ export class AppSession {
 				if (env.id) this.reply(env, "ack");
 				return;
 			case "mesh.subscribe": {
-				const snapshot = ctx.mesh.subscribe(this.conn, d.machineId);
+				const snapshot = ctx.mesh.subscribe(this.conn, d.machineId ?? null);
 				this.conn.send(envelope("mesh.snapshot", snapshot, env.id ? { re: env.id } : {}));
 				return;
 			}

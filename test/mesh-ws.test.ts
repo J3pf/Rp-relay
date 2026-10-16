@@ -66,6 +66,29 @@ describe("WS mesh subscriptions", () => {
 		await Promise.all([agent.client.waitClosed(), app.waitClosed()]);
 	});
 
+	it("subscribes to mesh with {} (all machines / absent machineId)", async () => {
+		const device = await pairDevice(t);
+		const machineA = await pairMachine(t, "mesh-omitted-a");
+		const machineB = await pairMachine(t, "mesh-omitted-b");
+		const agentA = await connectAgent(t, machineA, "mesh-omitted-agent-a");
+		const agentB = await connectAgent(t, machineB, "mesh-omitted-agent-b");
+		const { client: app } = await connectApp(t, device);
+
+		// Envía {} sin machineId para emular clientes con explicitNulls=false (Rp-app v0.3.0)
+		const subId = app.send("mesh.subscribe", {} as any);
+		const snapshot = await app.next("mesh.snapshot");
+		expect(snapshot.re).toBe(subId);
+		expect(snapshot.d).toMatchObject({ machineId: null });
+		expect((snapshot.d as any).nodes.map((node: any) => node.agentId)).toEqual(
+			expect.arrayContaining([agentA.agentId, agentB.agentId]),
+		);
+
+		agentA.client.close();
+		agentB.client.close();
+		app.close();
+		await Promise.all([agentA.client.waitClosed(), agentB.client.waitClosed(), app.waitClosed()]);
+	});
+
 	it("coalesces status, todo, and subagent changes to at most two updates per second", async () => {
 		const device = await pairDevice(t);
 		const machine = await pairMachine(t);

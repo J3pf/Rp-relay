@@ -41,7 +41,7 @@ export const CommEvent = Type.Object({
 });
 export type CommEvent = Static<typeof CommEvent>;
 
-export const MeshSubscribe = Type.Object({ machineId: Nullable(Id) });
+export const MeshSubscribe = Type.Object({ machineId: OptNullable(Id) });
 export type MeshSubscribe = Static<typeof MeshSubscribe>;
 
 export const MeshUnsubscribe = Type.Object({});
