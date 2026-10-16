@@ -8,6 +8,7 @@ import {
 	isPersistedEvent,
 } from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
+import type { CommRow } from "../db/repos/comms.js";
 import type { MachineRow } from "../db/repos/index.js";
 import type { AgentConn } from "../ws/conn.js";
 import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolution.js";
@@ -44,7 +45,7 @@ export class AgentService {
 
 	/** Tras `agent.hello` validado: registra la conexión, responde `agent.welcome` y reconcilia prompts. */
 	connect(conn: AgentConn, machine: MachineRow, h: AgentHello, reqId?: string): void {
-		const { repos, hub, prompts, publisher, hosts } = this.c();
+		const { repos, hub, prompts, publisher, hosts, mesh } = this.c();
 		const now = Date.now();
 		this.clearGrace(h.agentId);
 		const { row, epochChanged, previousSeq } = repos.agents.upsertFromHello(machine.id, h, now);
@@ -56,6 +57,7 @@ export class AgentService {
 		conn.lastTouchAt = now;
 		repos.machines.touch(machine.id, now);
 		hub.registerAgent(conn as AgentConn & { agentId: string });
+		mesh.invalidate();
 
 		const pendingAnswers = repos.prompts.pendingAnswers(h.agentId).flatMap((p) => {
 			try {
@@ -145,6 +147,7 @@ export class AgentService {
 		const e = ev.e as { type: string; [k: string]: unknown };
 		const now = Date.now();
 		let agentChanged = false;
+		let storedComm: CommRow | undefined;
 		const persisted = isPersistedEvent(e.type);
 		const shouldTouch = now - (conn.lastTouchAt ?? 0) >= 30_000;
 
@@ -172,7 +175,7 @@ export class AgentService {
 					if (!peerAgentId && comm.replyTo) {
 						peerAgentId = resolvePeerAgentIdFromReply(agentId, repos.comms.findByMessageId(comm.replyTo), allAgents);
 					}
-					repos.comms.upsert({
+					storedComm = repos.comms.upsert({
 						agent_id: agentId,
 						comm_id: comm.commId,
 						machine_id: conn.machineId,
@@ -233,6 +236,13 @@ export class AgentService {
 		if (persisted) repos.db.transaction(applyDbWrites)();
 		else applyDbWrites();
 
+		if (storedComm) {
+			this.c().mesh.invalidate();
+			this.c().mesh.onComm(storedComm);
+		} else if (e.type === "todo_update" || e.type === "subagent_update") {
+			this.c().mesh.invalidate();
+		}
+
 		if (e.type === "agent_settled") {
 			if (!e.aborted) dispatcher.settled(agentId, repos.agents.get(agentId)?.last_preview ?? null);
 		} else if (e.type === "terminal_wait") {
@@ -249,16 +259,17 @@ export class AgentService {
 	}
 
 	onStatus(conn: AgentConn, d: { status: string; detail?: string | null }): void {
-		const { repos, dispatcher, publisher } = this.c();
+		const { repos, dispatcher, publisher, mesh } = this.c();
 		if (!conn.agentId) return;
 		const prev = repos.agents.get(conn.agentId)?.status;
 		repos.agents.setStatus(conn.agentId, d.status, d.detail ?? null);
+		mesh.invalidate();
 		if (d.status === "error" && prev !== "error") dispatcher.agentError(conn.agentId, d.detail ?? null);
 		publisher.agent(conn.agentId);
 	}
 
 	onStatuses(conn: AgentConn, items: Record<string, string | null>): void {
-		const { repos, publisher } = this.c();
+		const { repos, publisher, mesh } = this.c();
 		if (!conn.agentId) return;
 		const raw = items["gentle:mode"];
 		let mode: string | null = null;
@@ -267,18 +278,20 @@ export class AgentService {
 			mode = m ? m[1]!.toLowerCase() : "unknown";
 		}
 		repos.agents.setStatuses(conn.agentId, items, mode);
+		mesh.invalidate();
 		publisher.agent(conn.agentId);
 	}
 
 	/** Cierre de la conexión del agente. */
 	disconnect(conn: AgentConn): void {
-		const { repos, hub, publisher, config } = this.c();
+		const { repos, hub, publisher, config, mesh } = this.c();
 		const agentId = conn.agentId;
 		if (!agentId) return;
 		if (!hub.unregisterAgent(conn)) return; // fue reemplazada por otra conexión: nada que hacer
 		this.c().log.info({ agentId, machineId: conn.machineId }, "agente desconectado");
 		repos.agents.setSeq(agentId, conn.lastSeq);
 		repos.agents.setOffline(agentId, Date.now());
+		mesh.invalidate();
 		publisher.agent(agentId);
 		publisher.machine(conn.machineId);
 		// los prompts abiertos se conservan una ventana de gracia por si el plugin reconecta
@@ -312,11 +325,12 @@ export class AgentService {
 	}
 
 	forget(agentId: string): boolean {
-		const { repos, hub, publisher, messages } = this.c();
+		const { repos, hub, publisher, messages, mesh } = this.c();
 		const a = repos.agents.get(agentId);
 		if (!a || hub.agents.has(agentId)) return false;
 		this.clearGrace(agentId);
 		repos.agents.delete(agentId);
+		mesh.invalidate();
 		messages.forget(agentId);
 		publisher.agentRemoved(agentId);
 		publisher.machine(a.machine_id);

@@ -123,7 +123,14 @@ export class AppSession {
 						.list()
 						.filter((m) => m.host_info || hub.hosts.has(m.id))
 						.map((m) => {
-							const info = m.host_info ? (JSON.parse(m.host_info) as any) : {};
+							let info: any = {};
+							if (m.host_info) {
+								try {
+									info = JSON.parse(m.host_info);
+								} catch {
+									info = {};
+								}
+							}
 							return {
 								machineId: m.id,
 								hostname: info.hostname ?? m.hostname ?? m.name,
@@ -157,6 +164,14 @@ export class AppSession {
 			case "agent.unsubscribe":
 				hub.unsubscribe(this.conn, d.agentId);
 				if (env.id) this.reply(env, "ack");
+				return;
+			case "mesh.subscribe": {
+				const snapshot = ctx.mesh.subscribe(this.conn, d.machineId);
+				this.conn.send(envelope("mesh.snapshot", snapshot, env.id ? { re: env.id } : {}));
+				return;
+			}
+			case "mesh.unsubscribe":
+				ctx.mesh.unsubscribe(this.conn);
 				return;
 			case "user.message": {
 				const { agentId, ...rest } = d;

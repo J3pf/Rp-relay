@@ -13,8 +13,14 @@ export class Hub {
 	readonly hosts = new Map<string, HostConn>();
 	readonly apps = new Set<AppConn>();
 	private subsByAgent = new Map<string, Set<AppConn>>();
+	private meshSubs = new Map<AppConn, string | null>();
+	private meshSubscriberListeners = new Set<() => void>();
 
 	constructor(private limits: HubLimits) {}
+
+	onMeshSubscribersChanged(listener: () => void): void {
+		this.meshSubscriberListeners.add(listener);
+	}
 
 	// ---- agentes ----
 	/** Registra la conexión; si había otra del mismo agente se cierra con `4003`. */
@@ -53,6 +59,7 @@ export class Hub {
 	}
 	removeApp(conn: AppConn): void {
 		this.apps.delete(conn);
+		this.unsubscribeMesh(conn);
 		for (const agentId of conn.subs) {
 			const set = this.subsByAgent.get(agentId);
 			if (set) {
@@ -79,6 +86,23 @@ export class Hub {
 			set.delete(conn);
 			if (set.size === 0) this.subsByAgent.delete(agentId);
 		}
+	}
+	subscribeMesh(conn: AppConn, machineId: string | null): void {
+		this.meshSubs.set(conn, machineId);
+		this.notifyMeshSubscribersChanged();
+	}
+	unsubscribeMesh(conn: AppConn): void {
+		if (!this.meshSubs.delete(conn)) return;
+		this.notifyMeshSubscribersChanged();
+	}
+	hasMeshSubscribers(): boolean {
+		return this.meshSubs.size > 0;
+	}
+	meshSubscribers(): Map<AppConn, string | null> {
+		return new Map(this.meshSubs);
+	}
+	private notifyMeshSubscribersChanged(): void {
+		for (const listener of this.meshSubscriberListeners) listener();
 	}
 	appsOfDevice(deviceId: string, mode?: AppConn["mode"]): AppConn[] {
 		return [...this.apps].filter((a) => a.deviceId === deviceId && (!mode || a.mode === mode));

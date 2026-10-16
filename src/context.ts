@@ -8,6 +8,7 @@ import type { AgentService } from "./domain/agents.js";
 import type { EntityService } from "./domain/entities.js";
 import type { HistoryService } from "./domain/history.js";
 import type { HostService } from "./domain/hosts.js";
+import type { MeshService } from "./domain/mesh/service.js";
 import type { MessageService } from "./domain/messages.js";
 import type { PromptService } from "./domain/prompts.js";
 import type { Publisher } from "./domain/publisher.js";
@@ -28,6 +29,7 @@ export interface Ctx {
 	agents: AgentService;
 	prompts: PromptService;
 	messages: MessageService;
+	mesh: MeshService;
 	history: HistoryService;
 	hosts: HostService;
 	entities: EntityService;

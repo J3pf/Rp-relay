@@ -18,6 +18,7 @@ import { AgentService } from "./domain/agents.js";
 import { EntityService } from "./domain/entities.js";
 import { HistoryService } from "./domain/history.js";
 import { HostService } from "./domain/hosts.js";
+import { MeshService } from "./domain/mesh/service.js";
 import { MessageService } from "./domain/messages.js";
 import { PromptService } from "./domain/prompts.js";
 import { Publisher } from "./domain/publisher.js";
@@ -112,6 +113,7 @@ export class Relay {
 			agents: new AgentService(get),
 			prompts: new PromptService(get),
 			messages: new MessageService(get),
+			mesh: new MeshService(get),
 			history: new HistoryService(get),
 			hosts: new HostService(get),
 			entities: new EntityService(get),
@@ -197,22 +199,24 @@ export class Relay {
 				const f = join(config.dataDir, "acme", "fullchain.pem");
 				if (!existsSync(f) || !needsRenewal(readFileSync(f))) return;
 				const m = await ensureAcmeCert(config, this.acme!, log, true);
-				(this.app.server as unknown as { setSecureContext(o: object): void }).setSecureContext({
-					key: m.key,
-					cert: m.cert,
-				});
+				this.setSecureContext({ key: m.key, cert: m.cert });
 				log.info("certificado ACME renovado");
 			});
 		} else if (config.tls && isFileTls(config.tls)) {
 			const t = config.tls;
 			this.every(12 * HOUR, () => {
 				const m = loadFileTls(t);
-				(this.app.server as unknown as { setSecureContext(o: object): void }).setSecureContext({
-					key: m.key,
-					cert: m.cert,
-				});
+				this.setSecureContext({ key: m.key, cert: m.cert });
 			});
 		}
+	}
+
+	private setSecureContext(options: { key: Buffer; cert: Buffer }): void {
+		// SAFETY: The app server is a TLS server in the renewal branches that call this method.
+		const server = this.app.server as unknown as {
+			setSecureContext(options: Record<string, unknown>): void;
+		};
+		server.setSecureContext(options);
 	}
 
 	backup(): string {
@@ -244,6 +248,7 @@ export class Relay {
 		await this.acme?.close();
 		ctx.agents.dispose();
 		ctx.messages.dispose();
+		ctx.mesh.dispose();
 		ctx.hosts.dispose();
 		try {
 			this.db.pragma("wal_checkpoint(TRUNCATE)");
