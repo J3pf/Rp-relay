@@ -79,10 +79,47 @@ describe("CommsRepo", () => {
 			message_id: "message-1",
 			peer_name: "Agent B",
 			text: "hello",
-			at: first.at + 1,
+			at: first.at,
 		});
 		expect(repos.comms.listSince(0)).toHaveLength(1);
 		expect(repos.comms.get("agent-a", "comm-1")).toEqual(updated);
+	});
+
+	it("does not overwrite established text or peer details when a later event differs", () => {
+		const { repos } = setup();
+		const first = repos.comms.upsert(comm({ text: "original text", peer_name: "Original peer" }));
+
+		const updated = repos.comms.upsert(
+			comm({
+				direction: "in",
+				channel: "orchestrator",
+				action: "message",
+				text: "replacement text",
+				peer_session_id: "different-session",
+				peer_name: "Different peer",
+				peer_cwd: "/different",
+				peer_ref: "different-ref",
+				peer_agent_id: "different-agent",
+				delivered: true,
+				message_id: "message-2",
+				at: first.at + 1,
+			}),
+		);
+
+		expect(updated).toMatchObject({
+			direction: "out",
+			channel: "intercom",
+			action: "send",
+			at: first.at,
+			text: "original text",
+			peer_session_id: "session-b",
+			peer_name: "Original peer",
+			peer_cwd: "/work/b",
+			peer_ref: "worker-b",
+			peer_agent_id: "agent-b",
+			delivered: 1,
+			message_id: "message-2",
+		});
 	});
 
 	it("lists conversations and agent comms in descending timestamp order", () => {

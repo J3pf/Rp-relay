@@ -11,14 +11,14 @@
       "direction": "out",
       "channel": "orchestrator",
       "action": "message",
-      "peer": { "sessionId": "session-orchestrator", "name": "orchestrator", "cwd": "/workspace", "ref": null },
+      "peer": { "sessionId": "session-remote", "name": "worker", "cwd": "/workspace", "ref": "ref-1" },
       "messageId": "msg-001",
       "replyTo": null,
       "expectsReply": false,
-      "text": "Please review the implementation",
+      "text": "Starting delegated work",
       "truncated": false,
       "delivered": true,
-      "at": 1760342401000
+      "at": 1760342400000
     }
   }
 }

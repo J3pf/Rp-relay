@@ -2,6 +2,7 @@ import {
 	type AgentEvent,
 	type AgentHello,
 	type AgentSnapshot,
+	type CommEvent,
 	envelope,
 	isDroppableEvent,
 	isPersistedEvent,
@@ -9,6 +10,7 @@ import {
 import type { Ctx } from "../context.js";
 import type { MachineRow } from "../db/repos/index.js";
 import type { AgentConn } from "../ws/conn.js";
+import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolution.js";
 
 export function previewOf(e: any): string | null {
 	const m = e?.message;
@@ -46,6 +48,7 @@ export class AgentService {
 		const now = Date.now();
 		this.clearGrace(h.agentId);
 		const { row, epochChanged, previousSeq } = repos.agents.upsertFromHello(machine.id, h, now);
+		this.resolveUnresolvedComms();
 		conn.agentId = h.agentId;
 		conn.instance = h.instance;
 		conn.epoch = h.epoch;
@@ -54,11 +57,19 @@ export class AgentService {
 		repos.machines.touch(machine.id, now);
 		hub.registerAgent(conn as AgentConn & { agentId: string });
 
-		const pendingAnswers = repos.prompts.pendingAnswers(h.agentId).map((p) => ({
-			promptId: p.id,
-			answer: JSON.parse(p.answer ?? "{}"),
-			deviceId: p.answered_by_device ?? undefined,
-		}));
+		const pendingAnswers = repos.prompts.pendingAnswers(h.agentId).flatMap((p) => {
+			try {
+				return [
+					{
+						promptId: p.id,
+						answer: JSON.parse(p.answer ?? "{}"),
+						deviceId: p.answered_by_device ?? undefined,
+					},
+				];
+			} catch {
+				return [];
+			}
+		});
 		conn.send(
 			envelope(
 				"agent.welcome",
@@ -94,6 +105,28 @@ export class AgentService {
 		publisher.agent(conn.agentId);
 	}
 
+	private resolveUnresolvedComms(): void {
+		const { repos } = this.c();
+		const allAgents = repos.agents.list();
+		for (const comm of repos.comms.listUnresolved()) {
+			let peerAgentId = resolvePeerAgentId(
+				comm.agent_id,
+				comm.machine_id,
+				{
+					sessionId: comm.peer_session_id,
+					name: comm.peer_name,
+					ref: comm.peer_ref,
+					cwd: comm.peer_cwd,
+				},
+				allAgents,
+			);
+			if (!peerAgentId && comm.reply_to) {
+				peerAgentId = resolvePeerAgentIdFromReply(comm.agent_id, repos.comms.findByMessageId(comm.reply_to), allAgents);
+			}
+			if (peerAgentId) repos.comms.setPeerAgentId(comm.agent_id, comm.comm_id, peerAgentId);
+		}
+	}
+
 	private switchEpoch(conn: AgentConn, epoch: string): void {
 		if (!conn.agentId) return;
 		const { repos } = this.c();
@@ -121,6 +154,46 @@ export class AgentService {
 				repos.agents.setSeq(agentId, ev.seq);
 			}
 			switch (e.type) {
+				case "comm": {
+					const comm = e as CommEvent;
+					const validAction =
+						comm.channel === "orchestrator"
+							? comm.action === "message"
+							: ["send", "ask", "reply", "handover"].includes(comm.action);
+					if (!validAction) {
+						this.c().log.warn(
+							{ agentId, commId: comm.commId, channel: comm.channel, action: comm.action },
+							"invalid comm channel/action combination; skipping comm persistence",
+						);
+						break;
+					}
+					const allAgents = repos.agents.list();
+					let peerAgentId = resolvePeerAgentId(agentId, conn.machineId, comm.peer, allAgents);
+					if (!peerAgentId && comm.replyTo) {
+						peerAgentId = resolvePeerAgentIdFromReply(agentId, repos.comms.findByMessageId(comm.replyTo), allAgents);
+					}
+					repos.comms.upsert({
+						agent_id: agentId,
+						comm_id: comm.commId,
+						machine_id: conn.machineId,
+						direction: comm.direction,
+						channel: comm.channel,
+						action: comm.action,
+						peer_session_id: comm.peer.sessionId,
+						peer_name: comm.peer.name,
+						peer_cwd: comm.peer.cwd,
+						peer_ref: comm.peer.ref,
+						peer_agent_id: peerAgentId,
+						message_id: comm.messageId,
+						reply_to: comm.replyTo,
+						expects_reply: comm.expectsReply,
+						text: comm.text,
+						truncated: comm.truncated,
+						delivered: comm.delivered ?? null,
+						at: comm.at,
+					});
+					break;
+				}
 				case "message_end": {
 					const pv = previewOf(e);
 					if (pv) {

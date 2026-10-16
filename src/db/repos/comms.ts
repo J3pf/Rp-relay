@@ -60,22 +60,15 @@ export class CommsRepo {
 				at, created_at, updated_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(agent_id, comm_id) DO UPDATE SET
-				machine_id=excluded.machine_id,
-				direction=excluded.direction,
-				channel=excluded.channel,
-				action=excluded.action,
-				peer_session_id=COALESCE(excluded.peer_session_id, comms.peer_session_id),
-				peer_name=COALESCE(excluded.peer_name, comms.peer_name),
-				peer_cwd=COALESCE(excluded.peer_cwd, comms.peer_cwd),
-				peer_ref=COALESCE(excluded.peer_ref, comms.peer_ref),
-				peer_agent_id=COALESCE(excluded.peer_agent_id, comms.peer_agent_id),
-				message_id=COALESCE(excluded.message_id, comms.message_id),
-				reply_to=COALESCE(excluded.reply_to, comms.reply_to),
-				expects_reply=excluded.expects_reply,
-				text=COALESCE(excluded.text, comms.text),
-				truncated=excluded.truncated,
 				delivered=COALESCE(excluded.delivered, comms.delivered),
-				at=excluded.at,
+				message_id=COALESCE(excluded.message_id, comms.message_id),
+				peer_session_id=COALESCE(comms.peer_session_id, excluded.peer_session_id),
+				peer_name=COALESCE(comms.peer_name, excluded.peer_name),
+				peer_cwd=COALESCE(comms.peer_cwd, excluded.peer_cwd),
+				peer_ref=COALESCE(comms.peer_ref, excluded.peer_ref),
+				peer_agent_id=COALESCE(comms.peer_agent_id, excluded.peer_agent_id),
+				reply_to=COALESCE(comms.reply_to, excluded.reply_to),
+				text=COALESCE(comms.text, excluded.text),
 				updated_at=excluded.updated_at`,
 		).run(
 			comm.agent_id,
@@ -106,6 +99,13 @@ export class CommsRepo {
 		return stmt(this.db, "SELECT * FROM comms WHERE agent_id=? AND comm_id=?").get(agentId, commId) as
 			| CommRow
 			| undefined;
+	}
+
+	findByMessageId(messageId: string): CommRow | undefined {
+		return stmt(
+			this.db,
+			"SELECT * FROM comms WHERE message_id=? ORDER BY at DESC, agent_id ASC, comm_id ASC LIMIT 1",
+		).get(messageId) as CommRow | undefined;
 	}
 
 	listSince(sinceAt: number, machineId?: string | null): CommRow[] {
