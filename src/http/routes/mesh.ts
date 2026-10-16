@@ -10,6 +10,7 @@ import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
 import type { CommRow } from "../../db/repos/comms.js";
+import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
 
 const MAX_LIMIT = 100;
@@ -85,7 +86,14 @@ export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 		{ schema: { querystring: MeshConversationQuery }, preHandler: auth.device },
 		async (req): Promise<MeshConversationRes> => {
 			const { a, b } = req.query;
-			const before = req.query.before === undefined ? undefined : Number(req.query.before);
+			let before: number | undefined;
+			if (req.query.before !== undefined) {
+				const beforeNum = Number(req.query.before);
+				if (Number.isNaN(beforeNum) || beforeNum <= 0) {
+					throw new RelayError("bad_request", "before debe ser un timestamp numérico válido");
+				}
+				before = beforeNum;
+			}
 			const limit = clampedLimit(req.query.limit);
 			const fetchedRows = c().repos.comms.listConversation(a, b, before, limit + 1);
 			const hasNextPage = fetchedRows.length > limit;

@@ -20,7 +20,8 @@
         "gate",
         "rp_ask_user",
         "attachments",
-        "deliver_terminal"
+        "deliver_terminal",
+        "comm"
       ]
     },
     "session": {

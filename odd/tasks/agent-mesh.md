@@ -29,7 +29,7 @@ Canonical contract in Rp-relay: packages/protocol, docs/PROTOCOLO.md, and fixtur
 - T5 [done] (S10): WS mesh.* subscription handling, coalescing <= 2/s, per-machine cache invalidation, live mesh.comm broadcast, redaction handling. Route: gentle-ai-worker. Commit: 334af8a.
 - T6 [done] (S11): HTTP routes for GET /v1/mesh, GET /v1/mesh/conversation, GET /v1/mesh/agents/:agentId/comms with device auth and validation. Route: gentle-ai-worker. Commit: 646efd2.
 - T7 [done] (S12): Full test suite integration (topology unit tests, WS client integration, HTTP routes, migration, active edge refresh G1, load smoke test, npm run check). Route: gentle-ai-worker. Commit: 6b06d3a.
-- T8 [done] (S13): Documentation update in README.md and docs/INSTALACION.md in Spanish. Route: gentle-ai-worker. Commit: pending.
+- T8 [done] (S13): Documentation update in README.md and docs/INSTALACION.md in Spanish. Route: gentle-ai-worker. Commit: adffc78.
 - T9 [in_progress] (S14): Final verification with gentle-ai-verify, merge feat/agent-mesh to main, bump version 0.5.0, tag, push main+tags, publish GitHub release, and final intercom report. Route: parent / gentle-ai-verify. Commit: pending.
 
 ## Log

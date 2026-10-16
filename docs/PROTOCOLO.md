@@ -57,7 +57,7 @@ Códigos: `bad_request`, `unauthorized`, `not_found`, `conflict` (p. ej. prompt 
 ```jsonc
 { "agentId":"…", "kind":"pi", "instance":"…", "epoch":"…",   // kind: tipo de agente (hoy sólo "pi"; extensible)
   "pi": { "version":"1.2.0", "mode":"tui" },        // ctx.mode
-  "plugin": { "version":"0.1.0", "features":["mirror_ui","adapters:gentle-ask","gate","rp_ask_user","attachments","deliver_terminal"] },
+  "plugin": { "version":"0.1.0", "features":["mirror_ui","adapters:gentle-ask","gate","rp_ask_user","attachments","deliver_terminal","comm"] },
   "session": { "id":"…", "file":"/home/u/.pi/agent/sessions/…jsonl", "name":"refactor auth" },
   "host": { "hostname":"devbox", "user":"jorge", "pid":4242, "os":"linux" },
   "launcher":"gentle-shell",                         // pi | gentle-shell

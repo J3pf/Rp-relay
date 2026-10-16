@@ -1,6 +1,6 @@
 import { AgentCommsRes, MeshConversationRes, MeshSnapshot } from "@j3pf/rp-protocol";
 import { Value } from "@sinclair/typebox/value";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	type AgentClient,
 	api,
@@ -114,6 +114,42 @@ describe("HTTP mesh routes", () => {
 		expect(filtered.status).toBe(200);
 		expect(filtered.json.machineId).toBe(machineA.machineId);
 		expect(filtered.json.nodes.map((node: { agentId: string }) => node.agentId)).toEqual([agentA.agentId]);
+	});
+
+	it("refreshes edge activity on HTTP snapshots without WS subscribers", async () => {
+		const { device, agentA, agentB } = await setupAgents();
+		const at = Date.now();
+		recordComm(agentA, agentB, { commId: "active-edge", messageId: "active-edge-message", at });
+		await waitForComms(agentA.agentId, 1);
+
+		const first = await api(t, "GET", "/v1/mesh", device.deviceToken);
+		expect(first.status).toBe(200);
+		expect(first.json.edges).toHaveLength(1);
+		expect(first.json.edges[0].active).toBe(true);
+
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(at + 20_001);
+		try {
+			const later = await api(t, "GET", "/v1/mesh", device.deviceToken);
+			expect(later.status).toBe(200);
+			expect(later.json.edges[0].active).toBe(false);
+		} finally {
+			nowSpy.mockRestore();
+		}
+	});
+
+	it("rejects non-numeric conversation before cursors", async () => {
+		const { device, agentA, agentB } = await setupAgents();
+		const response = await api(
+			t,
+			"GET",
+			`/v1/mesh/conversation?a=${encodeURIComponent(agentA.agentId)}&b=${encodeURIComponent(agentB.agentId)}&before=abc`,
+			device.deviceToken,
+		);
+		expect(response.status).toBe(400);
+		expect(response.json.error).toMatchObject({
+			code: "bad_request",
+			message: "before debe ser un timestamp numérico válido",
+		});
 	});
 
 	it("returns descending conversation messages, deduplicates out/in rows, keeps OUT action, and redacts sender text", async () => {

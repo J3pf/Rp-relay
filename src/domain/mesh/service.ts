@@ -35,52 +35,58 @@ export class MeshService {
 	}
 
 	getSnapshot(machineId: string | null): MeshSnapshot {
-		const cached = this.cache.get(machineId);
-		if (cached) return cached.snapshot;
-
-		const { repos } = this.c();
 		const now = Date.now();
-		const agents = repos.agents.list();
-		const latestTodosByAgent: Record<string, TodoTask[]> = Object.create(null);
-		const latestSubagentsByAgent: Record<string, SubagentUpdateEvent[]> = Object.create(null);
-		for (const agent of agents) {
-			const sinceSeq = Math.max(0, agent.last_seq - 5_000);
-			for (const event of repos.events.since(agent.id, agent.epoch, sinceSeq, 5_000)) {
-				let payload: { type?: string; tasks?: TodoTask[]; [key: string]: unknown };
-				try {
-					payload = JSON.parse(event.payload) as typeof payload;
-				} catch {
-					continue;
-				}
-				if (payload.type === "todo_update" && Array.isArray(payload.tasks)) {
-					latestTodosByAgent[agent.id] = payload.tasks;
-				} else if (payload.type === "subagent_update") {
-					let events = latestSubagentsByAgent[agent.id];
-					if (!events) {
-						events = [];
-						latestSubagentsByAgent[agent.id] = events;
+		let snapshot = this.cache.get(machineId)?.snapshot;
+		if (!snapshot) {
+			const { repos } = this.c();
+			const agents = repos.agents.list();
+			const latestTodosByAgent: Record<string, TodoTask[]> = Object.create(null);
+			const latestSubagentsByAgent: Record<string, SubagentUpdateEvent[]> = Object.create(null);
+			for (const agent of agents) {
+				const sinceSeq = Math.max(0, agent.last_seq - 5_000);
+				for (const event of repos.events.since(agent.id, agent.epoch, sinceSeq, 5_000)) {
+					let payload: { type?: string; tasks?: TodoTask[]; [key: string]: unknown };
+					try {
+						payload = JSON.parse(event.payload) as typeof payload;
+					} catch {
+						continue;
 					}
-					events.push(payload as SubagentUpdateEvent);
+					if (payload.type === "todo_update" && Array.isArray(payload.tasks)) {
+						latestTodosByAgent[agent.id] = payload.tasks;
+					} else if (payload.type === "subagent_update") {
+						let events = latestSubagentsByAgent[agent.id];
+						if (!events) {
+							events = [];
+							latestSubagentsByAgent[agent.id] = events;
+						}
+						events.push(payload as SubagentUpdateEvent);
+					}
 				}
 			}
+			const openPromptsByAgent: Record<string, number> = Object.create(null);
+			for (const prompt of repos.prompts.list(["open"])) {
+				openPromptsByAgent[prompt.agent_id] = (openPromptsByAgent[prompt.agent_id] ?? 0) + 1;
+			}
+			snapshot = buildMeshSnapshot({
+				agents,
+				machines: repos.machines.list(),
+				comms: repos.comms.listSince(now - DAY_MS),
+				now,
+				machineFilter: machineId,
+				openPromptsByAgent,
+				latestTodosByAgent,
+				latestSubagentsByAgent,
+			});
+			this.cache.set(machineId, { snapshot, generatedAt: snapshot.generatedAt });
+			this.scheduleActiveExpiry([...this.cache.values()].map((cached) => cached.snapshot));
 		}
-		const openPromptsByAgent: Record<string, number> = Object.create(null);
-		for (const prompt of repos.prompts.list(["open"])) {
-			openPromptsByAgent[prompt.agent_id] = (openPromptsByAgent[prompt.agent_id] ?? 0) + 1;
-		}
-		const snapshot = buildMeshSnapshot({
-			agents,
-			machines: repos.machines.list(),
-			comms: repos.comms.listSince(now - DAY_MS),
-			now,
-			machineFilter: machineId,
-			openPromptsByAgent,
-			latestTodosByAgent,
-			latestSubagentsByAgent,
-		});
-		this.cache.set(machineId, { snapshot, generatedAt: snapshot.generatedAt });
-		this.scheduleActiveExpiry([...this.cache.values()].map((cached) => cached.snapshot));
-		return snapshot;
+		return {
+			...snapshot,
+			edges: snapshot.edges.map((edge) => ({
+				...edge,
+				active: now - edge.lastAt <= 20_000,
+			})),
+		};
 	}
 
 	invalidate(): void {
