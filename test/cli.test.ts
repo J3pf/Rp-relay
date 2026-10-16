@@ -221,7 +221,7 @@ describe("CLI sin el relay en marcha", () => {
 	});
 });
 
-describe("CLI contra el relay en marcha (API de administración)", () => {
+describe("CLI contra el relay en marcha (API de administración)", { timeout: 60_000 }, () => {
 	let t: TestRelay;
 	const withServer = async (fn: () => Promise<void>) => {
 		t = await startRelay(

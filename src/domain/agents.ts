@@ -288,6 +288,7 @@ export class AgentService {
 		const agentId = conn.agentId;
 		if (!agentId) return;
 		if (!hub.unregisterAgent(conn)) return; // fue reemplazada por otra conexión: nada que hacer
+		if (!repos.db.open) return;
 		this.c().log.info({ agentId, machineId: conn.machineId }, "agente desconectado");
 		repos.agents.setSeq(agentId, conn.lastSeq);
 		repos.agents.setOffline(agentId, Date.now());

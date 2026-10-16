@@ -14,6 +14,7 @@ type CachedSnapshot = { snapshot: MeshSnapshot; generatedAt: number };
 export class MeshService {
 	private cache = new Map<string | null, CachedSnapshot>();
 	private updateTimer: NodeJS.Timeout | undefined;
+	private activeExpiryTimer: NodeJS.Timeout | undefined;
 	private lastUpdateAt = 0;
 	private listenerRegistered = false;
 	private seenCommIds = new Map<string, number>();
@@ -78,6 +79,7 @@ export class MeshService {
 			latestSubagentsByAgent,
 		});
 		this.cache.set(machineId, { snapshot, generatedAt: snapshot.generatedAt });
+		this.scheduleActiveExpiry([...this.cache.values()].map((cached) => cached.snapshot));
 		return snapshot;
 	}
 
@@ -147,6 +149,7 @@ export class MeshService {
 	dispose(): void {
 		if (this.updateTimer) clearTimeout(this.updateTimer);
 		this.updateTimer = undefined;
+		this.clearActiveExpiryTimer();
 		this.cache.clear();
 	}
 
@@ -157,8 +160,44 @@ export class MeshService {
 			if (this.c().hub.hasMeshSubscribers()) return;
 			if (this.updateTimer) clearTimeout(this.updateTimer);
 			this.updateTimer = undefined;
+			this.clearActiveExpiryTimer();
 			this.cache.clear();
 		});
+	}
+
+	private clearActiveExpiryTimer(): void {
+		if (this.activeExpiryTimer) clearTimeout(this.activeExpiryTimer);
+		this.activeExpiryTimer = undefined;
+	}
+
+	private scheduleActiveExpiry(snapshots: MeshSnapshot[]): void {
+		const { hub } = this.c();
+		if (!hub.hasMeshSubscribers()) {
+			this.clearActiveExpiryTimer();
+			return;
+		}
+
+		let earliestExpiry = Number.POSITIVE_INFINITY;
+		for (const snapshot of snapshots) {
+			for (const edge of snapshot.edges) {
+				if (edge.active) earliestExpiry = Math.min(earliestExpiry, edge.lastAt + 20_000);
+			}
+		}
+		if (!Number.isFinite(earliestExpiry)) {
+			this.clearActiveExpiryTimer();
+			return;
+		}
+
+		this.clearActiveExpiryTimer();
+		this.activeExpiryTimer = setTimeout(
+			() => {
+				this.activeExpiryTimer = undefined;
+				this.cache.clear();
+				this.scheduleUpdate();
+			},
+			Math.max(1, earliestExpiry - Date.now()),
+		);
+		this.activeExpiryTimer.unref();
 	}
 
 	private scheduleUpdate(): void {

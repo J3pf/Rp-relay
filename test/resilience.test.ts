@@ -87,7 +87,7 @@ describe("resiliencia: relay caído y reiniciado", () => {
 	});
 
 	it("tras reiniciar el relay, los agentes quedan offline hasta reconectar; sin reconexión los prompts abiertos se cancelan tras la gracia", async () => {
-		let t = await start();
+		let t = await start({ limits: { promptGraceSeconds: 0.8 } });
 		const dev = await pairDevice(t);
 		const m = await pairMachine(t);
 		const agent = await connectAgent(t, m, "r2");
@@ -98,7 +98,7 @@ describe("resiliencia: relay caído y reiniciado", () => {
 		const list = await api(t, "GET", "/v1/agents", dev.deviceToken);
 		expect(list.json.agents.find((a: any) => a.agentId === agent.agentId).online).toBe(false);
 		expect(t.relay.ctx.repos.prompts.get("RP2")!.state).toBe("open");
-		await sleep(700);
+		await sleep(1_000);
 		expect(t.relay.ctx.repos.prompts.get("RP2")!.state).toBe("cancelled");
 	});
 

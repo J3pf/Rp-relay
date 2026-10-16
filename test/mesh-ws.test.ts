@@ -217,6 +217,58 @@ describe("WS mesh subscriptions", () => {
 		]);
 	});
 
+	it("refreshes an active comm edge to inactive without another event", async () => {
+		const device = await pairDevice(t);
+		const machine = await pairMachine(t);
+		const sender = await connectAgent(t, machine, "mesh-active-sender");
+		const receiver = await connectAgent(t, machine, "mesh-active-receiver");
+		const { client: app } = await connectApp(t, device);
+		app.send("mesh.subscribe", { machineId: null });
+		await app.next("mesh.snapshot");
+
+		const at = Date.now() - 16_000;
+		sender.event({
+			type: "comm",
+			commId: "mesh-active-expiry",
+			direction: "out",
+			channel: "intercom",
+			action: "send",
+			peer: { sessionId: "mesh-active-receiver", name: "Receiver", cwd: "/home/u/api", ref: null },
+			messageId: "mesh-active-message",
+			replyTo: null,
+			expectsReply: false,
+			text: "A recent comm",
+			truncated: false,
+			delivered: true,
+			at,
+		});
+
+		try {
+			await app.next("mesh.comm");
+			const activeUpdate = await app.next(
+				(message) =>
+					message.t === "mesh.update" &&
+					(message.d as any).edges.some((edge: any) => edge.lastAt === at && edge.active === true),
+			);
+			const activeEdge = (activeUpdate.d as any).edges.find((edge: any) => edge.lastAt === at);
+			expect(activeEdge).toMatchObject({ lastAt: at, active: true });
+
+			const inactiveUpdate = await app.next(
+				(message) =>
+					message.t === "mesh.update" &&
+					(message.d as any).edges.some((edge: any) => edge.lastAt === at && edge.active === false),
+				7_000,
+			);
+			const inactiveEdge = (inactiveUpdate.d as any).edges.find((edge: any) => edge.lastAt === at);
+			expect(inactiveEdge).toMatchObject({ lastAt: at, active: false });
+		} finally {
+			sender.client.close();
+			receiver.client.close();
+			app.close();
+			await Promise.all([sender.client.waitClosed(), receiver.client.waitClosed(), app.waitClosed()]);
+		}
+	});
+
 	it("redacts live comm text from a redacted sender", async () => {
 		const device = await pairDevice(t);
 		const machine = await pairMachine(t);
