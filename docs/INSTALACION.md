@@ -25,7 +25,8 @@ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs build-essential   # build-essential sólo si better-sqlite3 no trae binario para tu CPU
 # 2. Usuario de servicio y paquete
 sudo useradd --system --home /var/lib/rp-relay --shell /usr/sbin/nologin rp-relay
-sudo npm install -g @j3pf/rp-relay
+# El paquete no se publica en el registro público de npm; se instala el tarball oficial de GitHub Releases:
+sudo npm install -g https://github.com/J3pf/Rp-relay/releases/download/v0.5.1/j3pf-rp-relay-0.5.1.tgz
 sudo rp-relay init --public-url https://relay.midominio.com        # crea /etc/rp-relay/config.json y la base de datos
 sudo chown -R rp-relay:rp-relay /var/lib/rp-relay
 # 3. systemd
@@ -142,7 +143,7 @@ El cuerpo de cada push se cifra con AES‑256‑GCM con una clave por dispositiv
 - **Copias:** cada hora (`VACUUM INTO dataDir/backups/rp-AAAAMMDD-HHMMSS.db`, 7 días). Antes de cada migración sobre una base
   con datos se hace una copia adicional. Para réplica continua usa Litestream sobre `relay.db` (opcional).
   Restaurar: `systemctl stop rp-relay && rp-relay restore <archivo> && systemctl start rp-relay`.
-- **Actualizar:** `sudo npm i -g @j3pf/rp-relay@latest && sudo systemctl restart rp-relay`. El cierre ordenado avisa a todos los
+- **Actualizar:** `sudo npm i -g https://github.com/J3pf/Rp-relay/releases/download/v0.5.1/j3pf-rp-relay-0.5.1.tgz && sudo systemctl restart rp-relay`. El cierre ordenado avisa a todos los
   clientes con `1012` y reconectan de inmediato; las migraciones se aplican al arrancar.
 - **Revocar:** `rp-relay devices revoke <id>` / `machines revoke <id>` (o desde la app). Cortan las conexiones al instante.
 - **Privacidad:** el relay nunca ejecuta nada en las PCs ni guarda credenciales de Pi. Los tokens sólo se guardan como SHA‑256.

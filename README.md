@@ -41,10 +41,10 @@ RP_CONFIG=./config.json node dist/cli/index.js doctor
 Para un servidor en producción (Ubuntu Server 22.04 / 24.04), dispones del instalador automatizado idempotente o instalación manual:
 
 ```bash
-# Opción 1: Instalador automatizado con Caddy (TLS automático)
+# Opción 1: Instalador automatizado con Caddy (TLS automático; descarga el tarball de GitHub Releases)
 sudo ./deploy/install.sh --public-url https://relay.midominio.com --caddy --name "Mi Relay"
 
-# Opción 2: Instalación manual paso a paso
+# Opción 2: Instalación manual paso a paso (vía npm install -g <tarball-release-url>)
 # Consulta la guía completa en docs/INSTALACION.md
 ```
 

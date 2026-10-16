@@ -2,7 +2,7 @@
 # Instalador nativo de rp-relay para Ubuntu Server 22.04 / 24.04 (Opción A / A2).
 #
 #   sudo ./install.sh --public-url https://relay.midominio.com [--caddy] [--name "Servidor casa"]
-#                     [--version 0.1.0] [--from ./j3pf-rp-relay-0.1.0.tgz] [--port 8787]
+#                     [--version 0.5.1] [--from ./j3pf-rp-relay-0.5.1.tgz] [--port 8787]
 #
 # Es idempotente: se puede volver a ejecutar para actualizar. No toca config.json si ya existe.
 set -euo pipefail
@@ -65,13 +65,19 @@ install -d -o rp-relay -g rp-relay -m 750 /var/lib/rp-relay
 install -d -o root -g rp-relay -m 750 /etc/rp-relay
 
 # 3. Paquete
-if [[ -n "$FROM" ]]; then
-  log "Instalando rp-relay desde $FROM"
-  npm install -g "$FROM"
+if [[ -z "$FROM" ]]; then
+  TAG="${VERSION}"
+  if [[ "$TAG" == "latest" || "$TAG" == "0.5.1" || "$TAG" == "v0.5.1" ]]; then
+    FROM="https://github.com/J3pf/Rp-relay/releases/download/v0.5.1/j3pf-rp-relay-0.5.1.tgz"
+  else
+    V_NUM="${TAG#v}"
+    FROM="https://github.com/J3pf/Rp-relay/releases/download/v${V_NUM}/j3pf-rp-relay-${V_NUM}.tgz"
+  fi
+  log "Instalando rp-relay desde GitHub Releases (${FROM})"
 else
-  log "Instalando @j3pf/rp-relay@${VERSION}"
-  npm install -g "@j3pf/rp-relay@${VERSION}"
+  log "Instalando rp-relay desde $FROM"
 fi
+npm install -g "$FROM"
 command -v rp-relay >/dev/null || die "rp-relay no quedó en el PATH"
 RP_BIN="$(command -v rp-relay)"
 if [[ "$RP_BIN" != "/usr/bin/rp-relay" ]]; then

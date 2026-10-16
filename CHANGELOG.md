@@ -10,6 +10,7 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 ### Corregido
 - **Versión dinámica en `/healthz` y CLI:** Se deriva `VERSION` directamente desde `package.json` en tiempo de ejecución (`src/http/routes/health.ts`), eliminando la versión hardcodeada y evitando desincronizaciones en `/healthz` y `rp-relay version`.
 - **Compatibilidad con `Rp-app` en `MeshSubscribe`:** Se cambia `machineId` a `OptNullable(Id)` en el esquema `mesh.subscribe` de `@j3pf/rp-protocol` y se normaliza en el relay (`d.machineId ?? null`), permitiendo que clientes con `explicitNulls=false` que envían `{}` se suscriban a todas las máquinas (`machineId: null`).
+- **Instalación y actualización standalone:** Se actualiza `deploy/install.sh`, `docs/INSTALACION.md` y `README.md` para instalar desde el artefacto oficial de GitHub Releases (empaquetado con `@j3pf/rp-protocol`), evitando errores 404 al no estar publicado en npm.
 
 ### Auditoría
 - Auditoría exhaustiva de los 14 esquemas `appUp` confirmando que ningún otro campo de tipo `Nullable` corre riesgo de omisión por parte de la app.
