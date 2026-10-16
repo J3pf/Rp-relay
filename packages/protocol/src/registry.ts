@@ -41,6 +41,7 @@ import {
 	HostSpawned,
 	HostsUpdate,
 } from "./host.js";
+import { MeshComm, MeshSnapshot, MeshSubscribe, MeshUnsubscribe, MeshUpdate } from "./mesh.js";
 import { PushNotify } from "./push.js";
 
 /**
@@ -91,6 +92,8 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 		"host.herdr_layout": HostHerdrLayout,
 		"host.spawn": HostSpawn,
 		"host.kill": HostKill,
+		"mesh.subscribe": MeshSubscribe,
+		"mesh.unsubscribe": MeshUnsubscribe,
 	},
 	appDown: {
 		"app.welcome": AppWelcome,
@@ -110,6 +113,9 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 		"host.dirs": HostDirs,
 		"host.herdr_layout.result": HostHerdrLayoutResult,
 		"host.spawned": HostSpawned,
+		"mesh.snapshot": MeshSnapshot,
+		"mesh.update": MeshUpdate,
+		"mesh.comm": MeshComm,
 	},
 	hostUp: {
 		"host.hello": HostHello,

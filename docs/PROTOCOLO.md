@@ -99,6 +99,7 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 | `session_compact` | sí (sólo resumen) | sí |
 | `todo_update` | sí (lista de tareas del agente) | sí |
 | `subagent_update` | sí (métrica y estado de subagente) | sí |
+| `comm` | comunicación intercom/orchestrator entre agentes; persistido, deduplicado y upsert | sí |
 | `ui_prompt_start/end` con `kind:"custom"|"editor"` | sí, como `{type:"terminal_wait", kind, title, active:bool}` | no |
 
 ### `agent.status` — `{ "status":"working", "detail":"bash: npm test" }` (cambios de estado derivados)
@@ -151,9 +152,11 @@ App → Relay:
 | `agent.abort` | `{ "agentId" }` | `ack` |
 | `prompt.answer` | `{ "promptId", "answer" }` | `prompt.answer.result { ok, reason? }` (`reason`: `already_resolved` / `agent_offline_queued`) |
 | `agent.forget` | `{ "agentId" }` (borrar agente offline de la lista) | `ack` |
+| `mesh.subscribe` | `{ "machineId": "…" | null }` (null = todas las máquinas) | `mesh.snapshot` y actualizaciones en vivo |
+| `mesh.unsubscribe` | `{}` | — |
 
 Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`, `agents.update { upsert:[AgentSummary], remove:[agentId] }`, `agent.event { agentId, epoch, seq, e }`,
-`prompt.opened { Prompt }`, `prompt.resolved { promptId, by, answer, byDeviceId? }`, `terminal_wait {agentId,…}`.
+`prompt.opened { Prompt }`, `prompt.resolved { promptId, by, answer, byDeviceId? }`, `terminal_wait {agentId,…}`, `mesh.snapshot { machineId, generatedAt, groups, nodes, edges }`, `mesh.update` (actualización del snapshot), `mesh.comm { comm }` (comunicación normalizada en vivo).
 
 `AgentSummary` = `{ agentId, machineId, machineName, machineContext, machineColor, sessionName, cwd, gitBranch, model, status, online, lastSeenAt, openPromptCount, lastMessagePreview (≤140 chars), launcher, herdr, gentleMode, redacted, spawnedByHost }`.
 
@@ -174,6 +177,9 @@ Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`
 | `PUT` | `/v1/devices/me/prefs` | device | preferencias de notificación globales y por PC: `{ categories:{…}, machines:{ "<machineId>": { mute:false, categories:{…}, quietHours:{from:"20:00",to:"08:00",tz:"America/Bogota"} } } }` |
 | `POST` | `/v1/agent/send` · `/v1/agent/poll` | machine | transporte de respaldo long-poll del plugin: `send` recibe un array de mensajes del §4; `poll` espera hasta 25 s y devuelve un array de mensajes del §5 |
 | `GET` | `/v1/agents` | device | lista (fallback sin WS) |
+| `GET` | `/v1/mesh` | device | snapshot del mesh; `machineId` opcional (null o ausente = todas las máquinas) |
+| `GET` | `/v1/mesh/conversation` | device | conversación entre `a` y `b`; acepta `before` y `limit` (1–100) |
+| `GET` | `/v1/mesh/agents/:agentId/comms` | device | comunicaciones del agente; acepta `limit` (1–100) |
 | `GET` | `/v1/prompts?state=open` | device | preguntas abiertas |
 | `POST` | `/v1/prompts/{id}/answer` | device | `{ answer }` → `200 {ok:true}` / `409 already_resolved` — **usado por los botones de la notificación** |
 | `POST` | `/v1/agents/{id}/messages` | device | igual que `user.message` (para RemoteInput "responder" en notificación de agente terminado) |

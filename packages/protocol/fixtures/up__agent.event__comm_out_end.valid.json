@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "t": "agent.event",
+  "ts": 1760342401000,
+  "d": {
+    "epoch": "01JA0000000000000000000E01",
+    "seq": 62,
+    "e": {
+      "type": "comm",
+      "commId": "comm-002",
+      "direction": "out",
+      "channel": "orchestrator",
+      "action": "ask",
+      "peer": { "sessionId": "session-orchestrator", "name": "orchestrator", "cwd": "/workspace", "ref": null },
+      "messageId": "message-002",
+      "replyTo": null,
+      "expectsReply": true,
+      "text": "Please review the implementation",
+      "truncated": false,
+      "delivered": true,
+      "at": 1760342401000
+    }
+  }
+}

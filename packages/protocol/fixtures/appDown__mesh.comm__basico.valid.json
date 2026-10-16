@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "t": "mesh.comm",
+  "ts": 1760342402000,
+  "d": {
+    "comm": {
+      "commKey": "comm-001",
+      "fromAgentId": "m-pc1:orchestrator",
+      "toAgentId": "m-pc1:worker-a",
+      "fromName": "orchestrator",
+      "toName": "worker-a",
+      "action": "ask",
+      "text": "Please review the implementation",
+      "truncated": false,
+      "at": 1760342402000,
+      "groupId": "group-main"
+    }
+  }
+}

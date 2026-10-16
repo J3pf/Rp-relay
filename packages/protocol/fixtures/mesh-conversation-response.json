@@ -1,0 +1,29 @@
+{
+  "items": [
+    {
+      "commKey": "comm-002",
+      "fromAgentId": "m-pc1:worker-a",
+      "toAgentId": "m-pc1:orchestrator",
+      "fromName": "worker-a",
+      "toName": "orchestrator",
+      "action": "reply",
+      "text": "Review complete, all tests are green.",
+      "truncated": false,
+      "at": 1760342410000,
+      "groupId": "group-main"
+    },
+    {
+      "commKey": "comm-001",
+      "fromAgentId": "m-pc1:orchestrator",
+      "toAgentId": "m-pc1:worker-a",
+      "fromName": "orchestrator",
+      "toName": "worker-a",
+      "action": "ask",
+      "text": "Please review the implementation",
+      "truncated": false,
+      "at": 1760342402000,
+      "groupId": "group-main"
+    }
+  ],
+  "nextBefore": 1760342400000
+}

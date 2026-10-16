@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "t": "mesh.update",
+  "ts": 1760342401000,
+  "d": {
+    "machineId": "m-pc1",
+    "generatedAt": 1760342401000,
+    "groups": [],
+    "nodes": [],
+    "edges": []
+  }
+}

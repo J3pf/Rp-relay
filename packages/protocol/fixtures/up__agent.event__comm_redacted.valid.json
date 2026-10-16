@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "t": "agent.event",
+  "ts": 1760342403000,
+  "d": {
+    "epoch": "01JA0000000000000000000E01",
+    "seq": 64,
+    "e": {
+      "type": "comm",
+      "commId": "comm-004",
+      "direction": "out",
+      "channel": "intercom",
+      "action": "message",
+      "peer": { "sessionId": null, "name": null, "cwd": null, "ref": null },
+      "messageId": null,
+      "replyTo": null,
+      "expectsReply": false,
+      "text": null,
+      "truncated": false,
+      "at": 1760342403000
+    }
+  }
+}

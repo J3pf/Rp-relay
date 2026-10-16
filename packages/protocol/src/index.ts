@@ -5,5 +5,6 @@ export * from "./constants.js";
 export * from "./envelope.js";
 export * from "./host.js";
 export * from "./http.js";
+export * from "./mesh.js";
 export * from "./push.js";
 export * from "./registry.js";

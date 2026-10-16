@@ -1,0 +1,136 @@
+{
+  "v": 1,
+  "t": "mesh.snapshot",
+  "ts": 1760342400000,
+  "d": {
+    "machineId": null,
+    "generatedAt": 1760342400000,
+    "groups": [
+      {
+        "groupId": "group-main",
+        "label": "Release work",
+        "orchestratorAgentId": "m-pc1:orchestrator",
+        "machineIds": ["m-pc1", "m-pc2"],
+        "memberAgentIds": ["m-pc1:orchestrator", "m-pc1:worker-a", "m-pc2:worker-b"],
+        "confidence": "comms"
+      }
+    ],
+    "nodes": [
+      {
+        "agentId": "m-pc1:orchestrator",
+        "machineId": "m-pc1",
+        "machineName": "PC principal",
+        "machineColor": "#4F7DF3",
+        "name": "orchestrator",
+        "cwd": "/workspace/project",
+        "gitBranch": "main",
+        "model": "anthropic/claude-sonnet",
+        "status": "working",
+        "activity": "Reviewing changes",
+        "online": true,
+        "role": "orchestrator",
+        "parentAgentId": null,
+        "groupId": "group-main",
+        "todos": { "total": 3, "done": 1, "inProgress": 1, "blocked": 0, "pending": 1, "current": "Review changes" },
+        "subagents": [
+          {
+            "taskId": "task-review",
+            "agent": "reviewer",
+            "label": "Review implementation",
+            "status": "running",
+            "model": "anthropic/claude-sonnet",
+            "thinking": "high",
+            "startedAt": 1760342390000,
+            "endedAt": null,
+            "durationMs": null,
+            "turns": 2,
+            "toolCalls": 4,
+            "tokens": { "prompt": 1200, "completion": 350, "total": 1550 },
+            "cost": 0.015,
+            "error": null,
+            "result": null,
+            "tools": ["read", "bash"]
+          }
+        ],
+        "lastCommAt": 1760342400000,
+        "openPromptCount": 0
+      },
+      {
+        "agentId": "m-pc1:worker-a",
+        "machineId": "m-pc1",
+        "machineName": "PC principal",
+        "machineColor": "#4F7DF3",
+        "name": "worker-a",
+        "cwd": "/workspace/project/packages/api",
+        "gitBranch": "main",
+        "model": "anthropic/claude-haiku",
+        "status": "idle",
+        "activity": null,
+        "online": true,
+        "role": "subordinate",
+        "parentAgentId": "m-pc1:orchestrator",
+        "groupId": "group-main",
+        "todos": null,
+        "subagents": [],
+        "lastCommAt": 1760342399000,
+        "openPromptCount": 0
+      },
+      {
+        "agentId": "m-pc2:worker-b",
+        "machineId": "m-pc2",
+        "machineName": "PC secundaria",
+        "machineColor": "#32A852",
+        "name": "worker-b",
+        "cwd": "/workspace/project/packages/web",
+        "gitBranch": null,
+        "model": null,
+        "status": "working",
+        "activity": "Implementing UI",
+        "online": true,
+        "role": "subordinate",
+        "parentAgentId": "m-pc1:orchestrator",
+        "groupId": "group-main",
+        "todos": { "total": 2, "done": 0, "inProgress": 1, "blocked": 1, "pending": 0, "current": null },
+        "subagents": [],
+        "lastCommAt": null,
+        "openPromptCount": 1
+      },
+      {
+        "agentId": "m-pc2:solo",
+        "machineId": "m-pc2",
+        "machineName": "PC secundaria",
+        "machineColor": "#32A852",
+        "name": "solo",
+        "cwd": null,
+        "gitBranch": null,
+        "model": null,
+        "status": "idle",
+        "activity": null,
+        "online": false,
+        "role": "solo",
+        "parentAgentId": null,
+        "groupId": null,
+        "todos": null,
+        "subagents": [],
+        "lastCommAt": null,
+        "openPromptCount": 0
+      }
+    ],
+    "edges": [
+      {
+        "edgeId": "m-pc1:orchestrator|m-pc1:worker-a",
+        "a": "m-pc1:orchestrator",
+        "b": "m-pc1:worker-a",
+        "count": 2,
+        "aToB": 1,
+        "bToA": 1,
+        "lastAt": 1760342400000,
+        "lastFrom": "m-pc1:orchestrator",
+        "lastAction": "ask",
+        "lastPreview": "Please review the implementation",
+        "pendingAsk": false,
+        "active": true
+      }
+    ]
+  }
+}
