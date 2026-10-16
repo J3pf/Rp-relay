@@ -1,7 +1,6 @@
 # rp-relay
 
-Relay autoalojable (Ubuntu Server) que conecta tus agentes [Pi](https://github.com/earendil-works/pi) con la app Android
-**RP**: lista de agentes en vivo, chat, adjuntos y **notificaciones push de preguntas/autorizaciones respondibles desde el móvil**.
+Relay autoalojable (Ubuntu Server) que conecta tus agentes Pi con la app Android RP: lista de agentes en vivo, chat, adjuntos, notificaciones push y **Agent Mesh** (grafo animado en tiempo real de agentes interconectados vía intercom y orchestrator).
 
 > Estado: **v0.4.0 publicado**: relay completo (Fastify + ws + SQLite).
 > Probado e integrado de extremo a extremo con los repos hermanos [`rp-plugin`](https://github.com/j3pf/rp-plugin) (Pi) y [`rp-app`](https://github.com/j3pf/rp-app) (Android).
@@ -16,6 +15,16 @@ Relay autoalojable (Ubuntu Server) que conecta tus agentes [Pi](https://github.c
 | [docs/INSTALACION.md](docs/INSTALACION.md) | Instalación (nativa, TLS integrado, Docker, Tailscale), configuración, Firebase, CLI y operación |
 
 Repos hermanos: [`rp-plugin`](https://github.com/j3pf/rp-plugin) (extensión de Pi) · [`rp-app`](https://github.com/j3pf/rp-app) (Android).
+
+## Agent Mesh
+
+Agent Mesh muestra la topología viva de agentes que se comunican entre sí en tiempo real, por máquina o de forma global. Incluye:
+
+- Detección automática del orquestador y jerarquías multinivel sin ciclos, a partir de iniciaciones de intercom y orchestrator.
+- Agrupación por componentes conectados, con fallback basado en el árbol de directorios de trabajo (CWD).
+- Estado en vivo por nodo: actividad, tareas TODO activas, hasta 10 subagentes lanzados (running primero) y preguntas pendientes.
+- Conexiones activas animadas de los últimos 20 s y visualización de mensajes en vivo; el modo redactado oculta los textos y preserva la topología.
+- Suscripción WebSocket con `mesh.subscribe` / `mesh.unsubscribe`, actualizaciones coalescidas (≤2/s) y endpoints HTTP REST: `/v1/mesh`, `/v1/mesh/conversation` y `/v1/mesh/agents/:id/comms`.
 
 ## Inicio rápido
 

@@ -147,6 +147,10 @@ El cuerpo de cada push se cifra con AES‑256‑GCM con una clave por dispositiv
 - **Revocar:** `rp-relay devices revoke <id>` / `machines revoke <id>` (o desde la app). Cortan las conexiones al instante.
 - **Privacidad:** el relay nunca ejecuta nada en las PCs ni guarda credenciales de Pi. Los tokens sólo se guardan como SHA‑256.
 
+### Agent Mesh
+
+Agent Mesh viene integrado en el relay y no requiere servicios externos. Usa la tabla `comms` de SQLite (`relay.db`), con retención automática de 7 días y un máximo de 20 000 filas; esta limpieza forma parte del ciclo de mantenimiento. La comunicación fluye por WebSocket (`/ws/app`, `/ws/agent`) y por la API REST (`/v1/mesh*`), lo que permite a la app Android mostrar la pantalla Mesh en tiempo real.
+
 ## Troubleshooting (Resolución de problemas)
 
 ### 1. Puerto en uso (`EADDRINUSE`)
