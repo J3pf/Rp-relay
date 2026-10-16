@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "commKey": "comm-003",
+      "fromAgentId": "m-pc1:orchestrator",
+      "toAgentId": "m-pc1:worker-a",
+      "fromName": "orchestrator",
+      "toName": "worker-a",
+      "action": "ask",
+      "text": "Can you review this change?",
+      "truncated": false,
+      "at": 1760342404000,
+      "groupId": "group-main"
+    }
+  ]
+}

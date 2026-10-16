@@ -11,12 +11,13 @@
       "direction": "out",
       "channel": "intercom",
       "action": "message",
-      "peer": { "sessionId": null, "name": null, "cwd": null, "ref": null },
+      "peer": { "sessionId": "sess-peer-1", "name": "peer-agent", "cwd": "/workspace", "ref": "peer-agent" },
       "messageId": null,
       "replyTo": null,
       "expectsReply": false,
       "text": null,
       "truncated": false,
+      "delivered": true,
       "at": 1760342403000
     }
   }

@@ -164,6 +164,25 @@ describe("retención", () => {
 				agent.event({ type: "message_end", message: { role: "assistant", content: `m${i}` } });
 			await sleep(150);
 			const ctx = t.relay.ctx;
+			ctx.repos.comms.upsert({
+				agent_id: agent.agentId,
+				comm_id: "retention-comm",
+				machine_id: m.machineId,
+				direction: "out",
+				channel: "intercom",
+				action: "message",
+				peer_session_id: null,
+				peer_name: null,
+				peer_cwd: null,
+				peer_ref: null,
+				message_id: null,
+				reply_to: null,
+				expects_reply: false,
+				text: "retention",
+				truncated: false,
+				delivered: null,
+				at: Date.now(),
+			});
 			expect(ctx.repos.events.count(agent.agentId)).toBe(25);
 			let s = await runRetention(ctx);
 			expect(s.events).toBe(15);
@@ -174,6 +193,8 @@ describe("retención", () => {
 			// por antigüedad
 			s = await runRetention(ctx, Date.now() + 8 * DAY);
 			expect(s.events).toBe(10);
+			expect(s.comms).toBe(1);
+			expect(ctx.repos.comms.get(agent.agentId, "retention-comm")).toBeUndefined();
 
 			// prompt cerrado antiguo
 			agent.client.send("prompt.open", promptBody(agent.agentId, { promptId: "OLDP" }));

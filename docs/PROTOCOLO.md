@@ -102,6 +102,35 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 | `comm` | comunicación intercom/orchestrator entre agentes; persistido, deduplicado y upsert | sí |
 | `ui_prompt_start/end` con `kind:"custom"|"editor"` | sí, como `{type:"terminal_wait", kind, title, active:bool}` | no |
 
+### Evento de comunicación `comm`
+
+`agent.event` con `e.type = "comm"` tiene esta forma. `peer` siempre es un objeto (no es nullable), aunque sus cuatro valores puedan ser `null`; `text` también es nullable y tiene un máximo de 2000 caracteres. `delivered` puede omitirse o ser `null` mientras la entrega está pendiente, y puede ser booleano cuando se conoce el resultado.
+
+```jsonc
+{
+  "type": "comm",
+  "commId": "comm-001",
+  "direction": "out",                       // "out" | "in"
+  "channel": "intercom",                    // "intercom" | "orchestrator"
+  "action": "ask",                          // "send" | "ask" | "reply" | "handover" | "message"
+  "peer": {
+    "sessionId": "sess-peer-1",              // string | null
+    "name": "peer-agent",                    // string | null
+    "cwd": "/workspace",                     // string | null
+    "ref": "peer-agent"                      // string | null
+  },
+  "messageId": "msg-003",                    // string | null
+  "replyTo": null,                            // string | null
+  "expectsReply": true,
+  "text": "¿Puedes revisar este cambio?",      // string (≤2000 chars) | null
+  "truncated": false,
+  "delivered": true,                          // opcional: boolean | null
+  "at": 1760342404000                         // epoch ms
+}
+```
+
+`commId` identifica la comunicación del agente que la emite. Un envío `out` puede producir dos eventos con el mismo `commId`: el inicio, normalmente con `delivered: null` y `messageId: null`, y el final, con los datos de entrega. `channel: "orchestrator"` **siempre** requiere `action: "message"` y `expectsReply: false`. El canal `intercom` admite las acciones del enum anterior, incluido `ask`.
+
 ### `agent.status` — `{ "status":"working", "detail":"bash: npm test" }` (cambios de estado derivados)
 ### `agent.statuses` — `{ "items": { "gentle:mode":"Permissions: AUTO", "rp":"📱", … } }` (estado completo de `setStatus` de todas las extensiones, coalescido ≤1/s; `gentle.mode` se deriva de aquí)
 
@@ -161,6 +190,125 @@ Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`
 `AgentSummary` = `{ agentId, machineId, machineName, machineContext, machineColor, sessionName, cwd, gitBranch, model, status, online, lastSeenAt, openPromptCount, lastMessagePreview (≤140 chars), launcher, herdr, gentleMode, redacted, spawnedByHost }`.
 
 `MachineSummary` (en `app.welcome.machines` y `machines.update`) = `{ machineId, name, context:"personal"|"work"|string, color:"#RRGGBB", icon, online, agentCount, openPromptCount, hostOnline }`.
+
+### Topología y comunicaciones del mesh
+
+`mesh.snapshot` y `mesh.update` llevan el mismo cuerpo `MeshSnapshot`; `mesh.update` es una actualización del snapshot completo, no un parche parcial. Los campos `Nullable` admiten `null` y los campos mostrados en las formas siguientes son obligatorios salvo que se marquen como opcionales.
+
+```jsonc
+{
+  "machineId": "m-pc1",                     // string (Id) | null; null = todas las máquinas
+  "generatedAt": 1760342400000,              // epoch ms
+  "groups": [
+    {
+      "groupId": "group-main",              // string
+      "label": "Release work",               // string
+      "orchestratorAgentId": "m-pc1:orchestrator", // Id | null
+      "machineIds": ["m-pc1"],               // Id[]
+      "memberAgentIds": ["m-pc1:orchestrator"], // Id[]
+      "confidence": "comms"                 // "comms" | "cwd"
+    }
+  ],
+  "nodes": [
+    {
+      "agentId": "m-pc1:orchestrator",       // Id
+      "machineId": "m-pc1",                 // Id
+      "machineName": "PC principal",          // string
+      "machineColor": "#4F7DF3",             // string
+      "name": "orchestrator",                // string
+      "cwd": "/workspace/project",            // string | null
+      "gitBranch": "main",                   // string | null
+      "model": "anthropic/claude-sonnet",     // string | null
+      "status": "working",                   // idle | working | waiting_input | compacting | error
+      "activity": "Reviewing changes",        // string | null
+      "online": true,
+      "role": "orchestrator",                // orchestrator | subordinate | solo
+      "parentAgentId": null,                  // Id | null
+      "groupId": "group-main",               // string | null
+      "todos": {                              // object | null
+        "total": 3,                           // integer ≥ 0
+        "done": 1,                            // integer ≥ 0
+        "inProgress": 1,                      // integer ≥ 0
+        "blocked": 0,                         // integer ≥ 0
+        "pending": 1,                         // integer ≥ 0
+        "current": "Review changes"           // string | null
+      },
+      "subagents": [
+        {
+          "taskId": "task-review",            // string
+          "agent": "reviewer",                // string
+          "label": "Review implementation",   // opcional: string
+          "status": "running",                // running | done | error | stopped | string extensible
+          "model": "anthropic/claude-sonnet", // opcional: string | null
+          "thinking": "high",                 // opcional: string | null
+          "startedAt": 1760342390000,          // opcional: number | null
+          "endedAt": null,                     // opcional: number | null
+          "durationMs": null,                  // opcional: number | null
+          "turns": 2,                          // opcional: integer | null
+          "toolCalls": 4,                      // opcional: integer | null
+          "tokens": {                          // opcional: object | null; sus propiedades también son opcionales
+            "prompt": 1200,                    // opcional: number
+            "completion": 350,                 // opcional: number
+            "total": 1550                      // opcional: number
+          },
+          "cost": 0.015,                       // opcional: number | null
+          "error": null,                       // opcional: string | null
+          "result": null,                      // opcional: cualquier valor | null
+          "tools": ["read", "bash"]           // opcional: string[] | null
+        }
+      ],
+      "lastCommAt": 1760342400000,             // number | null; epoch ms
+      "openPromptCount": 0                    // integer ≥ 0
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "m-pc1:orchestrator|m-pc1:worker-a", // string
+      "a": "m-pc1:orchestrator",              // Id
+      "b": "m-pc1:worker-a",                  // Id
+      "count": 2,                             // integer ≥ 0
+      "aToB": 1,                              // integer ≥ 0
+      "bToA": 1,                              // integer ≥ 0
+      "lastAt": 1760342400000,                // epoch ms
+      "lastFrom": "m-pc1:orchestrator",       // Id
+      "lastAction": "ask",                   // string
+      "lastPreview": "Please review this",    // string (≤140 chars) | null
+      "pendingAsk": false,
+      "active": true
+    }
+  ]
+}
+```
+
+`mesh.comm` tiene el cuerpo `{ "comm": CommView }`. `CommView` (también usado por las respuestas HTTP de §7) tiene todos estos campos:
+
+```jsonc
+{
+  "commKey": "comm-003",                     // string
+  "fromAgentId": "m-pc1:orchestrator",        // Id | null
+  "toAgentId": "m-pc1:worker-a",              // Id | null
+  "fromName": "orchestrator",                // string
+  "toName": "worker-a",                      // string
+  "action": "ask",                           // send | ask | reply | handover | message
+  "text": "Can you review this change?",      // string | null
+  "truncated": false,
+  "at": 1760342404000,                        // epoch ms
+  "groupId": "group-main"                    // string | null
+}
+```
+
+Semántica de topología, persistencia y conversación:
+
+1. **Upsert:** la clave es `(agentId, commId)`. Un evento `out` puede llegar primero con `delivered` y `messageId` nulos, y después otra vez al finalizar con los datos de entrega; ambos actualizan un solo registro, conservando los datos ya conocidos y completando `delivered`/`messageId`.
+2. **Deduplicación:** `out(A, messageId m)` y `in(B, messageId m)` representan un solo mensaje; no se duplican en la topología ni en la conversación.
+3. **Iniciaciones:** `send`, `ask`, `handover` y `message` cuentan como iniciaciones; `reply` no cuenta como iniciación.
+4. **Orquestador:** en cada componente conectado, es el nodo con más peers distintos a los que inició comunicación; en empate, el de más iniciaciones y después el más antiguo. Un nodo sólo puede ser orquestador si tiene al menos una iniciación.
+5. **Jerarquía y grupos:** `parentAgentId` es el peer que más inició comunicaciones hacia este nodo. La jerarquía es multinivel y se deriva sin ciclos. Cuando no hay comunicaciones, los agentes se agrupan por CWD (`confidence: "cwd"`); los grupos derivados de comunicaciones usan `confidence: "comms"`.
+6. **Coalescing:** las actualizaciones de snapshot se coalescen a un máximo de 2 por segundo por suscriptor.
+7. **Edge activo:** `active` es true cuando `lastAt` está dentro de los últimos 20 segundos.
+8. **Pregunta pendiente:** `pendingAsk` indica un `ask` sin un `reply` coincidente.
+9. **Redacción:** la redacción sólo anula `text` (y, por consiguiente, `lastPreview` / `CommView.text`). `peer`, `messageId`, `replyTo` y `expectsReply` permanecen visibles para conservar la topología del grafo.
+10. **Paginación:** `nextBefore` es el `at` del elemento más antiguo devuelto y sirve como cursor exclusivo (`at < nextBefore` para la página siguiente); es `null` cuando no hay más páginas.
 
 ## 7. HTTP API (`/v1`)
 
@@ -232,6 +380,67 @@ Campos y comportamientos añadidos sin cambiar el significado de ninguno existen
 - **Relay ⇄ CLI:** `/admin/*` (token en `dataDir/admin.token`, sólo sin cabecera `X-Forwarded-For`) no forma parte del contrato.
 - **Fixtures:** `packages/protocol/fixtures/<canal>__<tipo>__<etiqueta>.(valid|invalid).json`, con los canales
   `up`, `down`, `appUp`, `appDown`, `hostUp`, `hostDown` y `envelope`; `push-vector.json` es el vector de cifrado.
+
+### 7.3 Respuestas HTTP del mesh
+
+Los cuerpos de estas rutas son JSON y corresponden a los esquemas TypeBox `MeshSnapshot`, `MeshConversationRes` y `AgentCommsRes` de `packages/protocol`. En `/v1/mesh`, `machineId` puede omitirse o ser `null` para solicitar todas las máquinas; los arrays y todos sus objetos tienen la forma completa documentada en §6.
+
+`GET /v1/mesh` → `MeshSnapshot`:
+
+```jsonc
+{
+  "machineId": "m-pc1",       // string (Id) | null
+  "generatedAt": 1760342400000, // number, epoch ms
+  "groups": [ /* MeshGroup[]: todos los campos de §6 */ ],
+  "nodes": [ /* MeshNode[]: todos los campos de §6 */ ],
+  "edges": [ /* MeshEdge[]: todos los campos de §6 */ ]
+}
+```
+
+`GET /v1/mesh/conversation?a=<agentId>&b=<agentId>&before=<at>&limit=<1..100>` → `MeshConversationRes`:
+
+```jsonc
+{
+  "items": [
+    {
+      "commKey": "comm-003",                     // string
+      "fromAgentId": "m-pc1:orchestrator",        // Id | null
+      "toAgentId": "m-pc1:worker-a",              // Id | null
+      "fromName": "orchestrator",                // string
+      "toName": "worker-a",                      // string
+      "action": "ask",                           // send | ask | reply | handover | message
+      "text": "Can you review this change?",      // string | null
+      "truncated": false,
+      "at": 1760342404000,                        // number, epoch ms
+      "groupId": "group-main"                    // string | null
+    }
+  ],
+  "nextBefore": 1760342404000 // number | null; cursor exclusivo de §6
+}
+```
+
+`GET /v1/mesh/agents/:agentId/comms?limit=<1..100>` → `AgentCommsRes` (cada elemento de `items` tiene la misma forma completa `CommView` mostrada arriba):
+
+```jsonc
+{
+  "items": [
+    {
+      "commKey": "comm-003",
+      "fromAgentId": "m-pc1:orchestrator",
+      "toAgentId": "m-pc1:worker-a",
+      "fromName": "orchestrator",
+      "toName": "worker-a",
+      "action": "ask",
+      "text": "Can you review this change?",
+      "truncated": false,
+      "at": 1760342404000,
+      "groupId": "group-main"
+    }
+  ]
+}
+```
+
+`nextBefore` es el `at` del elemento más antiguo de `items`, que se envía como cursor exclusivo (`before`) para la página siguiente. Vale `null` cuando no existe otra página.
 
 ## 8. Push
 

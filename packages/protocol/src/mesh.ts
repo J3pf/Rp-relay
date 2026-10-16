@@ -136,7 +136,7 @@ export const CommView = Type.Object({
 	toAgentId: Nullable(Id),
 	fromName: Type.String(),
 	toName: Type.String(),
-	action: Type.String(),
+	action: CommAction,
 	text: Nullable(Type.String()),
 	truncated: Type.Boolean(),
 	at: Type.Number(),
