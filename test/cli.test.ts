@@ -205,8 +205,9 @@ describe("CLI sin el relay en marcha", () => {
 	});
 
 	it("migrate, version, ayuda y comando desconocido", async () => {
+		const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string };
 		expect((await cli(["migrate"], env)).out).toContain("Sin migraciones pendientes");
-		expect((await cli(["version"], env)).out.trim()).toBe("0.4.0");
+		expect((await cli(["version"], env)).out.trim()).toBe(pkg.version);
 		expect((await cli(["help"])).out).toContain("Uso: rp-relay");
 		const u = await cli(["frobnicar"]);
 		expect(u.code).toBe(2);

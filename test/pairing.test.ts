@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { hashToken, newPairingCode, normalizeCode } from "../src/auth/tokens.js";
 import { api, cleanup, newCode, pairDevice, pairMachine, startRelay, type TestRelay } from "./helpers.js";
@@ -121,8 +122,10 @@ describe("autenticación HTTP", () => {
 	});
 
 	it("healthz", async () => {
+		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 		const r = await api(t, "GET", "/healthz");
-		expect(r.json).toMatchObject({ ok: true, version: "0.4.0" });
+		expect(r.json).toMatchObject({ ok: true, version: pkg.version });
+		expect(r.json.version).toBe(pkg.version);
 	});
 
 	it("ruta inexistente → 404 con formato de error", async () => {
