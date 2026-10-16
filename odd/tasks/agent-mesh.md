@@ -26,9 +26,9 @@ Canonical contract in Rp-relay: packages/protocol, docs/PROTOCOLO.md, and fixtur
 - T2 [done] (S7): SQLite migration 0003_comms.sql, comms repo, upsert by (agent_id, comm_id), maintenance retention pruning (7 days, max 20k rows). Route: gentle-ai-worker. Commit: 75cffa7.
 - T3 [done] (S8): Peer resolution engine: exact session ID match, prefix >= 8 chars, session name match, machine affinity, replyTo comm lookup, re-resolution on connect. Route: gentle-ai-worker. Commit: 59c8f41.
 - T4 [done] (S9): Pure topology engine: deduplication, initiation scoring, orchestrator detection, parentAgentId tree derivation, connected components, cwd fallback, pendingAsk, todos derivation, subagent state extraction. Route: gentle-ai-worker. Commit: 58aba7e.
-- T5 [done] (S10): WS mesh.* subscription handling, coalescing <= 2/s, per-machine cache invalidation, live mesh.comm broadcast, redaction handling. Route: gentle-ai-worker. Commit: pending.
-- T6 [in_progress] (S11): HTTP routes for GET /v1/mesh, GET /v1/mesh/conversation, GET /v1/mesh/agents/:agentId/comms with device auth and validation. Route: gentle-ai-worker. Commit: pending.
-- T7 [pending] (S12): Full test suite integration (topology unit tests, WS client integration, HTTP routes, migration, load smoke test, npm run check). Route: gentle-ai-worker. Commit: pending.
+- T5 [done] (S10): WS mesh.* subscription handling, coalescing <= 2/s, per-machine cache invalidation, live mesh.comm broadcast, redaction handling. Route: gentle-ai-worker. Commit: 334af8a.
+- T6 [done] (S11): HTTP routes for GET /v1/mesh, GET /v1/mesh/conversation, GET /v1/mesh/agents/:agentId/comms with device auth and validation. Route: gentle-ai-worker. Commit: pending.
+- T7 [in_progress] (S12): Full test suite integration (topology unit tests, WS client integration, HTTP routes, migration, load smoke test, npm run check). Route: gentle-ai-worker. Commit: pending.
 - T8 [pending] (S13): Documentation update in README.md and docs/INSTALACION.md in Spanish. Route: gentle-ai-worker. Commit: pending.
 - T9 [pending] (S14): Final verification with gentle-ai-verify, merge feat/agent-mesh to main, bump version 0.5.0, tag, push main+tags, publish GitHub release, and final intercom report. Route: parent / gentle-ai-verify. Commit: pending.
 

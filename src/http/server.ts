@@ -14,6 +14,7 @@ import { registerAgents } from "./routes/agents.js";
 import { registerAgentTransport } from "./routes/agentTransport.js";
 import { registerDevices, registerMachines } from "./routes/devices.js";
 import { registerHealth } from "./routes/health.js";
+import { registerMesh } from "./routes/mesh.js";
 import { registerPair } from "./routes/pair.js";
 
 export interface BuildHttpOptions {
@@ -27,6 +28,7 @@ export interface BuildHttpOptions {
 export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 	const { config, log, c } = o;
 	const behindProxy = config.trustProxy ?? ["127.0.0.1", "::1", "localhost"].includes(config.listen.host);
+	// SAFETY: withTypeProvider() changes only the compile-time provider type; the returned value remains the Fastify instance passed to route registrars.
 	const app = Fastify({
 		loggerInstance: log,
 		trustProxy: behindProxy,
@@ -87,6 +89,7 @@ export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 	registerAgents(app, c, auth);
 	registerAgentTransport(app, c, auth, o.longPoll);
 	registerBlobRoutes(app, c, auth);
+	registerMesh(app, c, auth);
 	registerAdmin(app, c);
 	return app;
 }
