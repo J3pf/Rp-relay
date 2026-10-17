@@ -1,8 +1,8 @@
 # Opción B — Docker Compose: relay + Caddy (TLS automático).
 #   cp .env.example .env   # RP_DOMAIN=relay.midominio.com
 #   docker compose up -d
-#   docker compose exec relay node dist/cli/index.js pair device     # QR para la app
-#   docker compose exec relay node dist/cli/index.js doctor
+#   docker compose exec relay rp-relay pair device     # QR para la app
+#   docker compose exec relay rp-relay doctor
 services:
   relay:
     image: ghcr.io/j3pf/rp-relay:latest
@@ -29,7 +29,7 @@ services:
     stop_grace_period: 20s
 
   caddy:
-    image: caddy:2
+    image: caddy:2-alpine
     restart: unless-stopped
     depends_on:
       relay:
