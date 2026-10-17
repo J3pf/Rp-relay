@@ -228,7 +228,10 @@ export class AgentService {
 				}
 				case "thinking_level_select": {
 					const lvl = (e.level ?? e.thinking) as string | undefined;
-					if (typeof lvl === "string") repos.agents.setThinking(agentId, lvl);
+					if (typeof lvl === "string") {
+						repos.agents.setThinking(agentId, lvl);
+						agentChanged = true;
+					}
 					break;
 				}
 			}
