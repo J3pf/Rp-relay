@@ -5,6 +5,17 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.5.2] - 2026-10-17
+
+### Mejoras y Correcciones (Agent Mesh & Infraestructura)
+- **Deduplicación y paginación de comunicaciones:** Deduplicación y fusión de filas pareadas out/in antes de aplicar límites de página en `/v1/mesh/conversation` y `/v1/mesh/agents/:agentId/comms`, deduciendo `peer_agent_id` cuando el registro saliente no lo tenía resuelto.
+- **Validación de eventos y confirmación de secuencia:** Validación de esquemas `CommEvent` antes de persistencia en SQLite y avance diferido de `conn.lastSeq` sólo tras escrituras exitosas en base de datos.
+- **Invalidación reactiva y robustez en Mesh:** Invalidación de caché en Mesh ante cambios en prompts, agentes, revocación/edición de máquinas y purgas de retención. Ajuste del temporizador de aristas activas a `lastAt + 20_001` y refresco de `generatedAt` en snapshots cacheados.
+- **Persistencia de estado de agentes y subagentes:** Consulta indexada por tipo (`EventsRepo.listByTypes`) para preservar tareas TODO y eventos de subagentes frente a deltas de streaming de alta frecuencia.
+- **Suscripciones WebSocket y cuotas:** Rechazo explícito de `mesh.subscribe` en conexiones directas de push, confirmación `ack` a `mesh.unsubscribe` con `env.id`, y reseteo adecuado de cuotas cuando rp-host reconecta sin cuotas.
+- **Optimización de Dockerfile y Compose:** Contenedor optimizado con `tini` como supervisor PID 1, ejecución con usuario no root (`node`), healthcheck activo sobre `/healthz`, binario `rp-relay` en el PATH y `.dockerignore` refinado.
+- **Checklist de release / instalador:** Se documenta que el mapeo por defecto de `"latest"` en `deploy/install.sh` debe actualizarse obligatoriamente en cada release para resolver el tarball correspondiente de GitHub Releases (`j3pf-rp-relay-<version>.tgz`).
+
 ## [0.5.1] - 2026-10-16
 
 ### Corregido
