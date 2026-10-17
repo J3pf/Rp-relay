@@ -43,8 +43,12 @@ export class MeshService {
 			const latestTodosByAgent: Record<string, TodoTask[]> = Object.create(null);
 			const latestSubagentsByAgent: Record<string, SubagentUpdateEvent[]> = Object.create(null);
 			for (const agent of agents) {
-				const sinceSeq = Math.max(0, agent.last_seq - 5_000);
-				for (const event of repos.events.since(agent.id, agent.epoch, sinceSeq, 5_000)) {
+				for (const event of repos.events.listByTypes(
+					agent.id,
+					agent.epoch,
+					["todo_update", "subagent_update"],
+					1_000,
+				)) {
 					let payload: { type?: string; tasks?: TodoTask[]; [key: string]: unknown };
 					try {
 						payload = JSON.parse(event.payload) as typeof payload;
@@ -53,7 +57,12 @@ export class MeshService {
 					}
 					if (payload.type === "todo_update" && Array.isArray(payload.tasks)) {
 						latestTodosByAgent[agent.id] = payload.tasks;
-					} else if (payload.type === "subagent_update") {
+					} else if (
+						payload.type === "subagent_update" &&
+						typeof payload.taskId === "string" &&
+						payload.taskId.length > 0 &&
+						typeof payload.status === "string"
+					) {
 						let events = latestSubagentsByAgent[agent.id];
 						if (!events) {
 							events = [];
@@ -82,6 +91,7 @@ export class MeshService {
 		}
 		return {
 			...snapshot,
+			generatedAt: now,
 			edges: snapshot.edges.map((edge) => ({
 				...edge,
 				active: now - edge.lastAt <= 20_000,
@@ -108,11 +118,6 @@ export class MeshService {
 		const receiver = repos.agents.get(receiverId);
 		if (!sender || !receiver) return;
 
-		const subscribers = [...hub.meshSubscribers()].filter(
-			([, scope]) => scope === null || scope === sender.machine_id || scope === receiver.machine_id,
-		);
-		if (subscribers.length === 0) return;
-
 		const now = Date.now();
 		this.pruneSeen(now);
 		const commKey = `${comm.agent_id}\u0000${comm.comm_id}`;
@@ -121,12 +126,28 @@ export class MeshService {
 			if (comm.message_id !== null) this.seenMessageIds.set(comm.message_id, now);
 			return;
 		}
+		this.seenCommIds.set(commKey, now);
+		if (comm.message_id !== null) this.seenMessageIds.set(comm.message_id, now);
+		this.pruneSeen(now);
 
-		const snapshot = this.getSnapshot(null);
-		const groupId =
-			snapshot.nodes.find((node) => node.agentId === senderId)?.groupId ??
-			snapshot.nodes.find((node) => node.agentId === receiverId)?.groupId ??
+		const subscribers = [...hub.meshSubscribers()].filter(
+			([, scope]) => scope === null || scope === sender.machine_id || scope === receiver.machine_id,
+		);
+		if (subscribers.length === 0) return;
+
+		const cached = this.cache.get(null)?.snapshot;
+		let groupId =
+			cached?.nodes.find((node) => node.agentId === senderId)?.groupId ??
+			cached?.nodes.find((node) => node.agentId === receiverId)?.groupId ??
 			null;
+		if (groupId === null) {
+			this.cache.delete(null);
+			const snapshot = this.getSnapshot(null);
+			groupId =
+				snapshot.nodes.find((node) => node.agentId === senderId)?.groupId ??
+				snapshot.nodes.find((node) => node.agentId === receiverId)?.groupId ??
+				null;
+		}
 		const commView: CommView = {
 			commKey: comm.comm_id,
 			fromAgentId: senderId,
@@ -140,15 +161,9 @@ export class MeshService {
 			groupId,
 		};
 		const message = envelope("mesh.comm", { comm: commView });
-		let sent = false;
 		for (const [conn] of subscribers) {
 			if (!conn.ready) continue;
-			sent = hub.sendApp(conn, message, true) || sent;
-		}
-		if (sent) {
-			this.seenCommIds.set(commKey, now);
-			if (comm.message_id !== null) this.seenMessageIds.set(comm.message_id, now);
-			this.pruneSeen(now);
+			hub.sendApp(conn, message, true);
 		}
 	}
 
@@ -186,7 +201,7 @@ export class MeshService {
 		let earliestExpiry = Number.POSITIVE_INFINITY;
 		for (const snapshot of snapshots) {
 			for (const edge of snapshot.edges) {
-				if (edge.active) earliestExpiry = Math.min(earliestExpiry, edge.lastAt + 20_000);
+				if (edge.active) earliestExpiry = Math.min(earliestExpiry, edge.lastAt + 20_001);
 			}
 		}
 		if (!Number.isFinite(earliestExpiry)) {

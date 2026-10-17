@@ -17,7 +17,7 @@ export class PromptService {
 
 	/** `prompt.open` del plugin (o reconciliación en `agent.hello`). */
 	onPluginOpen(agentId: string, p: PromptOpen): void {
-		const { repos, hub, summaries, publisher, dispatcher } = this.c();
+		const { repos, hub, summaries, publisher, dispatcher, mesh } = this.c();
 		const existing = repos.prompts.get(p.promptId);
 		if (existing) {
 			if (
@@ -30,6 +30,7 @@ export class PromptService {
 		} else repos.prompts.insert(agentId, { ...p, agentId }, Date.now());
 		const row = repos.prompts.get(p.promptId)!;
 		this.c().log.info({ promptId: p.promptId, agentId, category: p.category, danger: p.danger }, "prompt abierto");
+		mesh.invalidate();
 		hub.broadcastApps(envelope("prompt.opened", summaries.prompt(row)));
 		dispatcher.promptOpened(row);
 		publisher.agent(agentId);
@@ -114,9 +115,10 @@ export class PromptService {
 
 	/** Difunde la resolución, retira la notificación y actualiza contadores. */
 	private afterClose(prev: PromptRow, by: ResolvedBy, answer: Answer | null, byDeviceId: string | null): void {
-		const { repos, hub, publisher, dispatcher, log } = this.c();
+		const { repos, hub, publisher, dispatcher, log, mesh } = this.c();
 		log.info({ promptId: prev.id, agentId: prev.agent_id, by }, "prompt cerrado");
 		this.answerReqs.delete(prev.id);
+		mesh.invalidate();
 		const body: PromptResolved = { promptId: prev.id, by, answer };
 		if (byDeviceId) body.byDeviceId = byDeviceId;
 		hub.broadcastApps(envelope("prompt.resolved", body));

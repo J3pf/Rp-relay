@@ -48,7 +48,7 @@ describe("WS mesh subscriptions", () => {
 		expect(t.relay.ctx.hub.hasMeshSubscribers()).toBe(false);
 	});
 
-	it("stops sending updates after mesh.unsubscribe", async () => {
+	it("stops sending updates after mesh.unsubscribe and replies with ack", async () => {
 		const device = await pairDevice(t);
 		const machine = await pairMachine(t);
 		const agent = await connectAgent(t, machine, "mesh-unsubscribe");
@@ -56,7 +56,9 @@ describe("WS mesh subscriptions", () => {
 		app.send("mesh.subscribe", { machineId: null });
 		await app.next("mesh.snapshot");
 
-		app.send("mesh.unsubscribe", {});
+		const unsubId = app.send("mesh.unsubscribe", {});
+		const ack = await app.next("ack");
+		expect(ack.re).toBe(unsubId);
 		agent.client.send("agent.status", { status: "working", detail: "after unsubscribe" });
 		await app.never("mesh.update", 700);
 		expect(t.relay.ctx.hub.hasMeshSubscribers()).toBe(false);
@@ -351,6 +353,81 @@ describe("WS mesh subscriptions", () => {
 			listAgents.mockRestore();
 			agent.client.close();
 			await agent.client.waitClosed();
+		}
+	});
+
+	it("rejects mesh.subscribe on direct mode connections with bad_request", async () => {
+		const device = await pairDevice(t);
+		const { client: directApp } = await connectApp(t, device, "direct");
+		try {
+			const subId = directApp.send("mesh.subscribe", { machineId: null });
+			const err = await directApp.next("error");
+			expect(err.re).toBe(subId);
+			expect(err.d).toMatchObject({ code: "bad_request" });
+			expect(t.relay.ctx.hub.hasMeshSubscribers()).toBe(false);
+		} finally {
+			directApp.close();
+			await directApp.waitClosed();
+		}
+	});
+
+	it("skips malformed comm events without crashing and resolves unresolved comms on session_info_changed", async () => {
+		const device = await pairDevice(t);
+		const machine = await pairMachine(t);
+		const sender = await connectAgent(t, machine, "mesh-resilient-sender");
+		const receiver = await connectAgent(t, machine, "mesh-resilient-receiver", {
+			session: { id: "mesh-resilient-receiver", file: null, name: null },
+		});
+		const { client: app } = await connectApp(t, device);
+		app.send("mesh.subscribe", { machineId: null });
+		await app.next("mesh.snapshot");
+
+		try {
+			// 1. Malformed comm event (missing peer object) does not crash or poison session
+			sender.event({ type: "comm", commId: "bad-comm" });
+			// 2. Valid comm targeting receiver by future session name "RenamedReceiver"
+			sender.event({
+				type: "comm",
+				commId: "deferred-name-comm",
+				direction: "out",
+				channel: "intercom",
+				action: "send",
+				peer: { sessionId: null, name: "RenamedReceiver", cwd: null, ref: null },
+				messageId: "deferred-msg-1",
+				replyTo: null,
+				expectsReply: false,
+				text: "Hello future named session",
+				truncated: false,
+				delivered: true,
+				at: Date.now(),
+			});
+			await expect
+				.poll(() => t.relay.ctx.repos.comms.get(sender.agentId, "deferred-name-comm")?.peer_agent_id)
+				.toBeNull();
+
+			// 3. Receiver emits session_info_changed -> resolves the comm and broadcasts mesh.update with the edge
+			receiver.event({ type: "session_info_changed", name: "RenamedReceiver" });
+			const updated = await app.next(
+				(message) =>
+					message.t === "mesh.update" &&
+					(message.d as any).nodes.some((n: any) => n.agentId === receiver.agentId && n.name === "RenamedReceiver") &&
+					(message.d as any).edges.some(
+						(edge: any) =>
+							(edge.a === sender.agentId && edge.b === receiver.agentId) ||
+							(edge.a === receiver.agentId && edge.b === sender.agentId),
+					),
+			);
+			const matchedEdge = (updated.d as any).edges.find(
+				(edge: any) =>
+					(edge.a === sender.agentId && edge.b === receiver.agentId) ||
+					(edge.a === receiver.agentId && edge.b === sender.agentId),
+			);
+			expect(matchedEdge).toMatchObject({ count: 1 });
+		} finally {
+			sender.client.close();
+			receiver.client.close();
+			app.close();
+			await Promise.all([sender.client.waitClosed(), receiver.client.waitClosed(), app.waitClosed()]);
 		}
 	});
 });

@@ -33,7 +33,19 @@ function deduplicate(comms: CommRow[]): CommRow[] {
 		byMessageId.set(comm.message_id, rows);
 	}
 	for (const rows of byMessageId.values()) {
-		unique.push(rows.find((row) => row.direction === "out") ?? rows[0]!);
+		const primary = rows.find((row) => row.direction === "out") ?? rows[0]!;
+		const peerAgentId =
+			primary.peer_agent_id ??
+			(primary.direction === "out"
+				? (rows.find((row) => row.direction === "in" && row.agent_id !== primary.agent_id)?.agent_id ?? null)
+				: (rows.find((row) => row.direction === "out" && row.agent_id !== primary.agent_id)?.agent_id ?? null));
+		unique.push({
+			...primary,
+			peer_agent_id: peerAgentId,
+			reply_to: primary.reply_to ?? rows.find((row) => row.reply_to !== null)?.reply_to ?? null,
+			text: primary.text ?? rows.find((row) => row.text !== null)?.text ?? null,
+			at: Math.min(...rows.map((row) => row.at)),
+		});
 	}
 	return unique.sort(
 		(a, b) => b.at - a.at || b.comm_id.localeCompare(a.comm_id) || a.agent_id.localeCompare(b.agent_id),
@@ -95,12 +107,14 @@ export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 				before = beforeNum;
 			}
 			const limit = clampedLimit(req.query.limit);
-			const fetchedRows = c().repos.comms.listConversation(a, b, before, limit + 1);
-			const hasNextPage = fetchedRows.length > limit;
-			const items = toCommViews(deduplicate(fetchedRows), c).slice(0, limit);
+			const fetchedRows = c().repos.comms.listConversation(a, b, before, (limit + 1) * 2);
+			const deduped = deduplicate(fetchedRows);
+			const hasNextPage = deduped.length > limit;
+			const page = deduped.slice(0, limit);
+			const items = toCommViews(page, c);
 			return {
 				items,
-				nextBefore: hasNextPage ? (items.at(-1)?.at ?? null) : null,
+				nextBefore: hasNextPage ? (page.at(-1)?.at ?? null) : null,
 			};
 		},
 	);
@@ -120,8 +134,8 @@ export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 		async (req) => {
 			const agentId = decodeURIComponent(req.params.agentId);
 			const limit = clampedLimit(req.query.limit);
-			const comms = c().repos.comms.listByAgent(agentId, limit);
-			return { items: toCommViews(deduplicate(comms), c) };
+			const comms = c().repos.comms.listByAgent(agentId, limit * 2);
+			return { items: toCommViews(deduplicate(comms).slice(0, limit), c) };
 		},
 	);
 }

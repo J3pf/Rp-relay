@@ -14,7 +14,7 @@ export class EntityService {
 	}
 
 	revokeMachine(id: string): boolean {
-		const { repos, hub, prompts, publisher } = this.c();
+		const { repos, hub, prompts, publisher, mesh } = this.c();
 		const agents = repos.agents.byMachine(id);
 		const ok = repos.machines.revoke(id, Date.now());
 		if (!ok) return false;
@@ -24,13 +24,15 @@ export class EntityService {
 			repos.agents.setOffline(a.id, Date.now());
 			publisher.agentRemoved(a.id);
 		}
+		mesh.invalidate();
 		publisher.machineRemoved(id);
 		return true;
 	}
 
 	patchMachine(id: string, patch: MachinePatchRow): boolean {
-		const { repos, publisher } = this.c();
+		const { repos, publisher, mesh } = this.c();
 		if (!repos.machines.patch(id, patch)) return false;
+		mesh.invalidate();
 		publisher.machine(id);
 		for (const a of repos.agents.byMachine(id)) publisher.agent(a.id);
 		return true;

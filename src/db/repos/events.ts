@@ -33,6 +33,16 @@ export class EventsRepo {
 			limit,
 		) as EventRow[];
 	}
+	listByTypes(agentId: string, epoch: string, types: readonly string[], limit = 1000): EventRow[] {
+		if (types.length === 0) return [];
+		const placeholders = types.map(() => "?").join(",");
+		return (
+			stmt(
+				this.db,
+				`SELECT * FROM events WHERE agent_id=? AND epoch=? AND type IN (${placeholders}) ORDER BY seq DESC LIMIT ?`,
+			).all(agentId, epoch, ...types, limit) as EventRow[]
+		).reverse();
+	}
 	firstSeq(agentId: string, epoch: string): number | null {
 		const r = stmt(this.db, "SELECT MIN(seq) AS s FROM events WHERE agent_id=? AND epoch=?").get(agentId, epoch) as {
 			s: number | null;

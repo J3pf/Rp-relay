@@ -177,32 +177,39 @@ function isStrictAncestor(parent: string, child: string): boolean {
 }
 
 function todoSummary(tasks: TodoTask[] | undefined): MeshNode["todos"] {
-	if (!tasks?.length) return null;
+	const valid = tasks?.filter((task): task is TodoTask => Boolean(task && typeof task === "object"));
+	if (!valid?.length) return null;
 	return {
-		total: tasks.length,
-		done: tasks.filter((task) => task.status === "done").length,
-		inProgress: tasks.filter((task) => task.status === "in_progress").length,
-		blocked: tasks.filter((task) => task.status === "blocked").length,
-		pending: tasks.filter((task) => task.status === "pending").length,
-		current: tasks.find((task) => task.status === "in_progress")?.title ?? null,
+		total: valid.length,
+		done: valid.filter((task) => task.status === "done").length,
+		inProgress: valid.filter((task) => task.status === "in_progress").length,
+		blocked: valid.filter((task) => task.status === "blocked").length,
+		pending: valid.filter((task) => task.status === "pending").length,
+		current: valid.find((task) => task.status === "in_progress")?.title ?? null,
 	};
 }
 
 function latestSubagents(events: SubagentUpdateEvent[] | undefined): MeshNode["subagents"] {
 	if (!events?.length) return [];
 	const latestByTask = new Map<string, { event: SubagentUpdateEvent; index: number }>();
-	for (const [index, event] of events.entries()) latestByTask.set(event.taskId, { event, index });
+	for (const [index, event] of events.entries()) {
+		if (!event || typeof event.taskId !== "string" || event.taskId.length === 0) continue;
+		latestByTask.set(event.taskId, { event, index });
+	}
 	return [...latestByTask.values()]
 		.sort(
 			(a, b) =>
 				Number(b.event.status === "running") - Number(a.event.status === "running") ||
 				b.index - a.index ||
-				a.event.taskId.localeCompare(b.event.taskId),
+				String(a.event.taskId ?? "").localeCompare(String(b.event.taskId ?? "")),
 		)
 		.slice(0, 10)
 		.map(({ event }) => {
 			const { type: _type, ...subagent } = event;
-			return subagent;
+			return {
+				...subagent,
+				agent: typeof subagent.agent === "string" ? subagent.agent : "",
+			};
 		});
 }
 
@@ -419,11 +426,15 @@ function cwdGroups(members: AgentRow[]): {
 export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 	const now = options.now ?? Date.now();
 	const machineFilter = options.machineFilter ?? null;
+	const machinesById = new Map(options.machines.map((machine) => [machine.id, machine]));
 	const agents = options.agents
-		.filter((agent) => machineFilter === null || agent.machine_id === machineFilter)
+		.filter((agent) => {
+			const machine = machinesById.get(agent.machine_id);
+			if (!machine || machine.revoked_at) return false;
+			return machineFilter === null || agent.machine_id === machineFilter;
+		})
 		.sort((a, b) => a.id.localeCompare(b.id));
 	const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
-	const machinesById = new Map(options.machines.map((machine) => [machine.id, machine]));
 	const recentComms = options.comms.filter((comm) => comm.at >= now - DAY_MS);
 	const messages = deduplicateMessages(recentComms, new Set(agentsById.keys()));
 	const edgesById = new Map<string, InternalEdge>();

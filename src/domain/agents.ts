@@ -2,11 +2,12 @@ import {
 	type AgentEvent,
 	type AgentHello,
 	type AgentSnapshot,
-	type CommEvent,
+	CommEvent,
 	envelope,
 	isDroppableEvent,
 	isPersistedEvent,
 } from "@j3pf/rp-protocol";
+import { Value } from "@sinclair/typebox/value";
 import type { Ctx } from "../context.js";
 import type { CommRow } from "../db/repos/comms.js";
 import type { MachineRow } from "../db/repos/index.js";
@@ -143,7 +144,6 @@ export class AgentService {
 		if (!agentId) return;
 		if (ev.epoch !== conn.epoch) this.switchEpoch(conn, ev.epoch);
 		if (ev.seq <= conn.lastSeq) return; // reenvío (al menos una vez): ya visto
-		conn.lastSeq = ev.seq;
 		const e = ev.e as { type: string; [k: string]: unknown };
 		const now = Date.now();
 		let agentChanged = false;
@@ -158,7 +158,11 @@ export class AgentService {
 			}
 			switch (e.type) {
 				case "comm": {
-					const comm = e as CommEvent;
+					if (!Value.Check(CommEvent, e)) {
+						this.c().log.warn({ agentId, seq: ev.seq }, "invalid comm event payload; skipping comm persistence");
+						break;
+					}
+					const comm = e;
 					const validAction =
 						comm.channel === "orchestrator"
 							? comm.action === "message"
@@ -209,6 +213,7 @@ export class AgentService {
 					const name = (e.name ?? e.sessionName) as string | undefined;
 					if (typeof name === "string") {
 						repos.agents.setSession(agentId, name);
+						this.resolveUnresolvedComms();
 						agentChanged = true;
 					}
 					break;
@@ -235,11 +240,12 @@ export class AgentService {
 
 		if (persisted) repos.db.transaction(applyDbWrites)();
 		else applyDbWrites();
+		conn.lastSeq = ev.seq;
 
 		if (storedComm) {
-			this.c().mesh.invalidate();
 			this.c().mesh.onComm(storedComm);
-		} else if (e.type === "todo_update" || e.type === "subagent_update") {
+			this.c().mesh.invalidate();
+		} else if (agentChanged || e.type === "todo_update" || e.type === "subagent_update") {
 			this.c().mesh.invalidate();
 		}
 

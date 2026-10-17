@@ -25,6 +25,9 @@ export async function runRetention(c: Ctx, now = Date.now()): Promise<RetentionS
 	const codes = repos.pairing.purge(now - DAY);
 	const outbox = repos.outbox.purge(now);
 	const commsPruned = repos.comms.prune(7, 20_000, now);
+	if (stale.length > 0 || commsPruned > 0 || staleAnswered > 0 || events > 0) {
+		c.mesh.invalidate();
+	}
 	const blobsRemoved = await blobs.gc(now);
 	return {
 		events,

@@ -51,9 +51,7 @@ export class HostService {
 		const { repos, hub, publisher } = this.c();
 		this.c().log.info({ machineId: conn.machineId, hostname: hello.hostname }, "rp-host conectado");
 		repos.machines.setHostInfo(conn.machineId, hello);
-		if (Array.isArray(hello.quotas)) {
-			repos.machines.setQuotas(conn.machineId, hello.quotas);
-		}
+		repos.machines.setQuotas(conn.machineId, Array.isArray(hello.quotas) ? hello.quotas : null);
 		repos.machines.touch(conn.machineId, Date.now());
 		hub.registerHost(conn);
 		publisher.host(conn.machineId);

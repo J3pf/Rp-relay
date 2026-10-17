@@ -95,7 +95,13 @@ function machine(overrides: Partial<MachineRow> = {}): MachineRow {
 }
 
 function snapshot(agents: AgentRow[], comms: CommRow[] = [], extra: Record<string, unknown> = {}) {
-	return buildMeshSnapshot({ agents, machines: [machine()], comms, now, ...extra });
+	return buildMeshSnapshot({
+		agents,
+		machines: [machine(), machine({ id: "machine-2", name: "Workstation 2" })],
+		comms,
+		now,
+		...extra,
+	});
 }
 
 function node(result: ReturnType<typeof snapshot>, agentId: string) {
@@ -358,5 +364,38 @@ describe("buildMeshSnapshot", () => {
 				.subagents.slice(0, 5)
 				.every((item) => item.status === "running"),
 		).toBe(true);
+	});
+
+	it("excludes agents belonging to revoked or missing machines and ignores malformed todo/subagent entries", () => {
+		const validAgent = agent("a", { machine_id: "machine-1" });
+		const revokedAgent = agent("revoked-agent", { machine_id: "machine-revoked" });
+		const missingMachineAgent = agent("missing-machine-agent", { machine_id: "machine-missing" });
+		const result = buildMeshSnapshot({
+			agents: [validAgent, revokedAgent, missingMachineAgent],
+			machines: [machine({ id: "machine-1" }), machine({ id: "machine-revoked", revoked_at: now - 100 })],
+			comms: [comm("a", "revoked-agent"), comm("a", "missing-machine-agent")],
+			now,
+			latestTodosByAgent: {
+				a: [null as unknown as TodoTask, { id: "t-1", title: "Valid task", status: "in_progress" }],
+			},
+			latestSubagentsByAgent: {
+				a: [
+					{ type: "subagent_update", taskId: "" as string, agent: "bad", status: "running" },
+					{ type: "subagent_update", taskId: undefined as unknown as string, agent: "bad", status: "running" },
+					{ type: "subagent_update", taskId: "ok-task", agent: "worker", status: "done" },
+				],
+			},
+		});
+		expect(result.nodes.map((item) => item.agentId)).toEqual(["a"]);
+		expect(result.edges).toEqual([]);
+		expect(node(result, "a").todos).toEqual({
+			total: 1,
+			done: 0,
+			inProgress: 1,
+			blocked: 0,
+			pending: 0,
+			current: "Valid task",
+		});
+		expect(node(result, "a").subagents).toEqual([{ taskId: "ok-task", agent: "worker", status: "done" }]);
 	});
 });

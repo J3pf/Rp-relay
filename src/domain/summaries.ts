@@ -37,10 +37,7 @@ export class Summaries {
 		for (const a of repos.agents.byMachine(m.id)) open += ob.get(a.id) ?? 0;
 		const hostOnline = hub.hosts.has(m.id);
 		const agentOnline = hub.agentsOfMachine(m.id).length > 0;
-		const quotas =
-			(m.quotas ? parse<MachineQuota[]>(m.quotas) : null) ??
-			parse<{ quotas?: MachineQuota[] }>(m.host_info)?.quotas ??
-			undefined;
+		const quotas = m.quotas ? parse<MachineQuota[]>(m.quotas) : null;
 		return {
 			machineId: m.id,
 			name: m.name,

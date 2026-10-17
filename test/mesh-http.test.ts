@@ -259,4 +259,123 @@ describe("HTTP mesh routes", () => {
 			expect(item.commKey).toEqual(expect.any(String));
 		}
 	});
+
+	it("paginates paired out/in rows accurately and merges peer_agent_id from paired in row when out row was unresolved", async () => {
+		const { device, machineA, agentA, agentB } = await setupAgents();
+		const baseAt = Date.now() - 10_000;
+
+		// Message 1: out row initially has peer_agent_id = null, paired in row resolves peer_agent_id = agentA.agentId
+		t.relay.ctx.repos.comms.upsert({
+			agent_id: agentA.agentId,
+			comm_id: "out-unresolved-1",
+			machine_id: machineA.machineId,
+			direction: "out",
+			channel: "intercom",
+			action: "handover",
+			peer_session_id: null,
+			peer_name: "UnknownYet",
+			peer_cwd: null,
+			peer_ref: null,
+			peer_agent_id: null,
+			message_id: "paired-msg-1",
+			reply_to: null,
+			expects_reply: false,
+			text: "handover payload",
+			truncated: false,
+			delivered: true,
+			at: baseAt + 1_000,
+		});
+		recordComm(agentB, agentA, {
+			commId: "in-resolved-1",
+			direction: "in",
+			action: "send",
+			messageId: "paired-msg-1",
+			at: baseAt + 1_005,
+			text: "handover payload",
+		});
+
+		// Message 2: paired out + in
+		recordComm(agentA, agentB, {
+			commId: "out-2",
+			action: "ask",
+			messageId: "paired-msg-2",
+			at: baseAt + 2_000,
+			text: "question",
+		});
+		recordComm(agentB, agentA, {
+			commId: "in-2",
+			direction: "in",
+			action: "ask",
+			messageId: "paired-msg-2",
+			at: baseAt + 2_005,
+			text: "question",
+		});
+		await waitForComms(agentB.agentId, 3);
+
+		// Exactly 2 logical messages (4 raw rows): limit=2 should return both items and nextBefore: null
+		const conv = await api(
+			t,
+			"GET",
+			`/v1/mesh/conversation?a=${encodeURIComponent(agentA.agentId)}&b=${encodeURIComponent(agentB.agentId)}&limit=2`,
+			device.deviceToken,
+		);
+		expect(conv.status).toBe(200);
+		expect(conv.json.items).toHaveLength(2);
+		expect(conv.json.nextBefore).toBeNull();
+		expect(conv.json.items[1]).toMatchObject({
+			commKey: "out-unresolved-1",
+			fromAgentId: agentA.agentId,
+			toAgentId: agentB.agentId,
+			action: "handover",
+			at: baseAt + 1_000,
+		});
+
+		// Agent comms with limit=2 also returns 2 deduplicated items with resolved toAgentId
+		const agentComms = await api(
+			t,
+			"GET",
+			`/v1/mesh/agents/${encodeURIComponent(agentA.agentId)}/comms?limit=2`,
+			device.deviceToken,
+		);
+		expect(agentComms.status).toBe(200);
+		expect(agentComms.json.items).toHaveLength(2);
+		expect(agentComms.json.items[1]).toMatchObject({
+			commKey: "out-unresolved-1",
+			fromAgentId: agentA.agentId,
+			toAgentId: agentB.agentId,
+			action: "handover",
+		});
+	});
+
+	it("retains todo/subagent state across >5000 streaming deltas and invalidates cache on machine revoke", async () => {
+		const { device, machineB, agentA, agentB } = await setupAgents();
+		agentA.event({
+			type: "todo_update",
+			tasks: [{ id: "1", title: "Still active after deltas", status: "in_progress" }],
+		});
+		agentA.event({
+			type: "subagent_update",
+			taskId: "sub-1",
+			agent: "helper",
+			status: "running",
+		});
+		// Advance last_seq far beyond 5,000
+		agentA.client.send("agent.event", {
+			epoch: agentA.hello.epoch,
+			seq: 10_000,
+			e: { type: "agent_settled" },
+		});
+		await expect.poll(() => t.relay.ctx.repos.agents.get(agentA.agentId)?.last_seq).toBe(10_000);
+
+		const snap1 = await api(t, "GET", "/v1/mesh", device.deviceToken);
+		const nodeA = snap1.json.nodes.find((n: { agentId: string }) => n.agentId === agentA.agentId);
+		expect(nodeA.todos).toMatchObject({ current: "Still active after deltas", inProgress: 1 });
+		expect(nodeA.subagents).toEqual([expect.objectContaining({ taskId: "sub-1", status: "running" })]);
+
+		// Revoking machineB immediately removes agentB from /v1/mesh
+		t.relay.ctx.entities.revokeMachine(machineB.machineId);
+		const snap2 = await api(t, "GET", "/v1/mesh", device.deviceToken);
+		expect(snap2.json.nodes.map((n: { agentId: string }) => n.agentId)).toEqual([agentA.agentId]);
+		expect(snap2.json.nodes.map((n: { agentId: string }) => n.agentId)).not.toContain(agentB.agentId);
+	});
 });

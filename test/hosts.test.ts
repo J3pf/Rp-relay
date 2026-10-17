@@ -354,7 +354,21 @@ describe("rp-host (/ws/host)", () => {
 		const row = t.relay.ctx.repos.machines.get(m.machineId);
 		expect(JSON.parse(row!.quotas!)).toEqual(updatedQuotas);
 
+		// Al reconectar el host sin quotas en host.hello, las cuotas antiguas se limpian
 		host.close();
+		await host.waitClosed();
+		const hostReconnect = await connectHost(m);
+		const clearedUpdate = await app.next(
+			(e) =>
+				e.t === "machines.update" &&
+				(e.d as any).upsert[0]?.machineId === m.machineId &&
+				(e.d as any).upsert[0]?.hostOnline === true &&
+				(e.d as any).upsert[0]?.quotas === undefined,
+		);
+		expect((clearedUpdate.d as any).upsert[0].quotas).toBeUndefined();
+		expect(t.relay.ctx.repos.machines.get(m.machineId)?.quotas).toBeNull();
+
+		hostReconnect.close();
 		app.close();
 	});
 });
