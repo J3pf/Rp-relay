@@ -18,7 +18,9 @@ export class Summaries {
 	constructor(private c: () => Ctx) {}
 
 	agentLabel(a: AgentRow): string {
-		return agentDisplayName(a);
+		const snapshot = this.c().mesh.getSnapshot(null);
+		const node = snapshot.nodes.find((n) => n.agentId === a.id);
+		return node?.name ?? agentDisplayName(a);
 	}
 
 	machine(

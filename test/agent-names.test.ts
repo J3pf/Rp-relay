@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentDisplayName, disambiguateAgentNames, isHumanName } from "../src/domain/agentNames.js";
+import { agentDisplayName, disambiguateAgentNames, groupDisplayLabel, isHumanName } from "../src/domain/agentNames.js";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -130,6 +130,20 @@ describe("agentDisplayName", () => {
 		expect(agentDisplayName({ session_name: hyphenatedHex })).toBe("Agent");
 	});
 
+	it("preserves legitimate human names containing hex-like words and hyphens", () => {
+		expect(isHumanName("cafe-api")).toBe(true);
+		expect(agentDisplayName({ session_name: "cafe-api" })).toBe("cafe-api");
+
+		expect(isHumanName("add-feed")).toBe(true);
+		expect(agentDisplayName({ session_name: "add-feed" })).toBe("add-feed");
+
+		expect(isHumanName("Rp-app")).toBe(true);
+		expect(agentDisplayName({ session_name: "Rp-app" })).toBe("Rp-app");
+
+		expect(isHumanName("dead-beef")).toBe(true);
+		expect(agentDisplayName({ session_name: "dead-beef" })).toBe("dead-beef");
+	});
+
 	it("never returns a raw UUID or ID even if cwd basename is an ID", () => {
 		const uuid = "01a14fbb-44e3-765f-99e1-970655bf47bf";
 		const result = agentDisplayName({
@@ -190,5 +204,71 @@ describe("disambiguateAgentNames", () => {
 		const names = disambiguateAgentNames(agents);
 		expect(names.get("a-agent")).toBe("worker");
 		expect(names.get("z-agent")).toBe("worker (2)");
+	});
+});
+
+describe("groupDisplayLabel", () => {
+	it("prefers a human orchestrator session_name over common cwd", () => {
+		const orchestrator = {
+			session_name: "Release Squad",
+			cwd: "/home/drift/Workspace/RP",
+		};
+		const members = [
+			orchestrator,
+			{ cwd: "/home/drift/Workspace/RP/Rp-app" },
+			{ cwd: "/home/drift/Workspace/RP/Rp-relay" },
+		];
+		expect(groupDisplayLabel(orchestrator, members)).toBe("Release Squad");
+	});
+
+	it("resolves to common cwd basename when orchestrator session_name is non-human or absent", () => {
+		// Real case from C2: orchestrator cwd /home/drift/Workspace/RP with members in RP/Rp-app, RP/Rp-plugin, RP/Rp-relay → "RP"
+		const orchestrator = {
+			session_name: "01a14fbb-44e3-765f-99e1-970655bf47bf",
+			cwd: "/home/drift/Workspace/RP",
+		};
+		const members = [
+			orchestrator,
+			{ cwd: "/home/drift/Workspace/RP/Rp-app" },
+			{ cwd: "/home/drift/Workspace/RP/Rp-plugin" },
+			{ cwd: "/home/drift/Workspace/RP/Rp-relay" },
+		];
+		expect(groupDisplayLabel(orchestrator, members)).toBe("RP");
+
+		// Without orchestrator session_name
+		const unnamedOrchestrator = {
+			session_name: null,
+			cwd: "/home/drift/Workspace/RP",
+		};
+		expect(groupDisplayLabel(unnamedOrchestrator, members)).toBe("RP");
+	});
+
+	it("falls back to orchestrator display name when common cwd has no valid basename", () => {
+		const orchestrator = {
+			session_name: null,
+			cwd: "/home/drift/backend",
+		};
+		const members = [orchestrator, { cwd: "/var/log" }];
+		// Common path is "/" which has no basename
+		expect(groupDisplayLabel(orchestrator, members)).toBe("backend");
+	});
+
+	it("falls back to Mesh Group when no human name or cwd exists", () => {
+		const orchestrator = {
+			session_name: "01a14fbb-44e3-765f-99e1-970655bf47bf",
+			cwd: "/",
+		};
+		const members = [orchestrator, { cwd: null }];
+		expect(groupDisplayLabel(orchestrator, members)).toBe("Mesh Group");
+		expect(groupDisplayLabel(null, [])).toBe("Mesh Group");
+	});
+
+	it("never returns a raw UUID or ID as a group label", () => {
+		const uuid = "01a14fbb-44e3-765f-99e1-970655bf47bf";
+		const label = groupDisplayLabel({ session_name: uuid, cwd: `/tmp/${uuid}` }, [
+			{ session_name: uuid, cwd: `/tmp/${uuid}` },
+		]);
+		expect(label).toBe("Mesh Group");
+		expect(UUID_REGEX.test(label)).toBe(false);
 	});
 });

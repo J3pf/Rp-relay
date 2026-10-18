@@ -6,6 +6,7 @@ import {
 	api,
 	cleanup,
 	connectAgent,
+	connectApp,
 	pairDevice,
 	pairMachine,
 	startRelay,
@@ -439,5 +440,58 @@ describe("HTTP mesh routes", () => {
 		agentA.client.close();
 		agentB.client.close();
 		await Promise.all([agentA.client.waitClosed(), agentB.client.waitClosed()]);
+	});
+
+	it("emits fromName/toName matching disambiguated node names for duplicate agents via WS mesh.comm and HTTP /v1/mesh/conversation", async () => {
+		const device = await pairDevice(t);
+		const machine = await pairMachine(t, "mesh-dup-pc");
+		const { client: app } = await connectApp(t, device);
+		app.send("mesh.subscribe", { machineId: null });
+		await app.next("mesh.snapshot");
+
+		// Two agents with the exact same cwd on the same machine
+		const agent1 = await connectAgent(t, machine, "agent-dup-1", {
+			session: { id: "agent-dup-1", file: null, name: null },
+			cwd: "/workspace/Rp-app",
+		});
+		const agent2 = await connectAgent(t, machine, "agent-dup-2", {
+			session: { id: "agent-dup-2", file: null, name: null },
+			cwd: "/workspace/Rp-app",
+		});
+
+		// Check snapshot node names
+		const snap = await api(t, "GET", "/v1/mesh", device.deviceToken);
+		const node1 = snap.json.nodes.find((n: { agentId: string }) => n.agentId === agent1.agentId);
+		const node2 = snap.json.nodes.find((n: { agentId: string }) => n.agentId === agent2.agentId);
+		expect(node1.name).toBe("Rp-app");
+		expect(node2.name).toBe("Rp-app (2)");
+
+		// agent1 sends comm to agent2
+		recordComm(agent1, agent2, { commId: "dup-comm-1", at: Date.now() });
+
+		// WS mesh.comm
+		const wsComm = await app.next("mesh.comm");
+		const commData = (wsComm.d as any).comm;
+		expect(commData.fromName).toBe(node1.name);
+		expect(commData.toName).toBe(node2.name);
+
+		await waitForComms(agent1.agentId, 1);
+
+		// HTTP /v1/mesh/conversation
+		const convRes = await api(
+			t,
+			"GET",
+			`/v1/mesh/conversation?a=${encodeURIComponent(agent1.agentId)}&b=${encodeURIComponent(agent2.agentId)}`,
+			device.deviceToken,
+		);
+		expect(convRes.status).toBe(200);
+		expect(convRes.json.items).toHaveLength(1);
+		expect(convRes.json.items[0].fromName).toBe(node1.name);
+		expect(convRes.json.items[0].toName).toBe(node2.name);
+
+		agent1.client.close();
+		agent2.client.close();
+		app.close();
+		await Promise.all([agent1.client.waitClosed(), agent2.client.waitClosed(), app.waitClosed()]);
 	});
 });

@@ -136,25 +136,25 @@ export class MeshService {
 		);
 		if (subscribers.length === 0) return;
 
-		const cached = this.cache.get(null)?.snapshot;
-		let groupId =
-			cached?.nodes.find((node) => node.agentId === senderId)?.groupId ??
-			cached?.nodes.find((node) => node.agentId === receiverId)?.groupId ??
-			null;
-		if (groupId === null) {
+		let snapshot = this.cache.get(null)?.snapshot;
+		let senderNode = snapshot?.nodes.find((node) => node.agentId === senderId);
+		let receiverNode = snapshot?.nodes.find((node) => node.agentId === receiverId);
+		if (!snapshot || !senderNode || !receiverNode) {
 			this.cache.delete(null);
-			const snapshot = this.getSnapshot(null);
-			groupId =
-				snapshot.nodes.find((node) => node.agentId === senderId)?.groupId ??
-				snapshot.nodes.find((node) => node.agentId === receiverId)?.groupId ??
-				null;
+			snapshot = this.getSnapshot(null);
+			senderNode = snapshot.nodes.find((node) => node.agentId === senderId);
+			receiverNode = snapshot.nodes.find((node) => node.agentId === receiverId);
 		}
+		const groupId = senderNode?.groupId ?? receiverNode?.groupId ?? null;
+		const fromName = senderNode?.name ?? agentDisplayName(sender);
+		const toName = receiverNode?.name ?? agentDisplayName(receiver);
+
 		const commView: CommView = {
 			commKey: comm.comm_id,
 			fromAgentId: senderId,
 			toAgentId: receiverId,
-			fromName: agentDisplayName(sender),
-			toName: agentDisplayName(receiver),
+			fromName,
+			toName,
 			action: comm.action,
 			text: sender.redacted ? null : comm.text,
 			truncated: Boolean(comm.truncated),

@@ -80,19 +80,19 @@ function toCommViews(comms: CommRow[], c: () => Ctx): CommView[] {
 			cwd: comm.direction === "out" ? comm.peer_cwd : null,
 			id: receiverId,
 		};
-		const senderGroupId = snapshot.nodes.find((node) => node.agentId === senderId)?.groupId;
-		const receiverGroupId = snapshot.nodes.find((node) => node.agentId === receiverId)?.groupId;
+		const senderNode = senderId ? snapshot.nodes.find((node) => node.agentId === senderId) : undefined;
+		const receiverNode = receiverId ? snapshot.nodes.find((node) => node.agentId === receiverId) : undefined;
 		return {
 			commKey: comm.comm_id,
 			fromAgentId: senderId,
 			toAgentId: receiverId,
-			fromName: agentDisplayName(senderCandidate),
-			toName: agentDisplayName(receiverCandidate),
+			fromName: senderNode?.name ?? agentDisplayName(senderCandidate),
+			toName: receiverNode?.name ?? agentDisplayName(receiverCandidate),
 			action: comm.action,
 			text: sender?.redacted ? null : comm.text,
 			truncated: Boolean(comm.truncated),
 			at: comm.at,
-			groupId: senderGroupId ?? receiverGroupId ?? null,
+			groupId: senderNode?.groupId ?? receiverNode?.groupId ?? null,
 		};
 	});
 }

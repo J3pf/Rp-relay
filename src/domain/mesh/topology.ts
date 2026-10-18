@@ -3,7 +3,7 @@ import type { MeshGroup, MeshNode, MeshSnapshot, SubagentUpdateEvent, TodoTask }
 import type { AgentRow } from "../../db/repos/agents.js";
 import type { CommRow } from "../../db/repos/comms.js";
 import type { MachineRow } from "../../db/repos/machines.js";
-import { agentDisplayName, basename, disambiguateAgentNames, isHumanName } from "../agentNames.js";
+import { agentDisplayName, disambiguateAgentNames, groupDisplayLabel } from "../agentNames.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_MS = 20_000;
@@ -142,24 +142,6 @@ function connectedComponents(edges: Map<string, InternalEdge>): string[][] {
 		components.push(component.sort());
 	}
 	return components;
-}
-
-function commonCwd(agents: AgentRow[]): string | null {
-	const paths = agents
-		.map((agent) => agent.cwd)
-		.filter((cwd): cwd is string => Boolean(cwd))
-		.map(posix.normalize);
-	if (paths.length === 0) return null;
-	const firstParts = paths[0]!.split("/");
-	let commonParts = firstParts;
-	for (const cwd of paths.slice(1)) {
-		const parts = cwd.split("/");
-		let length = 0;
-		while (length < commonParts.length && length < parts.length && commonParts[length] === parts[length]) length++;
-		commonParts = commonParts.slice(0, length);
-	}
-	const common = commonParts.join("/");
-	return common || (paths.every((cwd) => cwd.startsWith("/")) ? "/" : null);
 }
 
 function cwdDepth(cwd: string): number {
@@ -319,16 +301,7 @@ function commsGroup(
 	const orchestrator = eligible[0] ?? null;
 	const memberIds = members.map((member) => member.id).sort();
 	const groupId = orchestrator?.id ?? `group-${memberIds[0]}`;
-	const commonBase = basename(commonCwd(members));
-	const labelCandidate =
-		(orchestrator?.session_name && isHumanName(orchestrator.session_name, orchestrator)
-			? orchestrator.session_name.trim()
-			: null) ??
-		(commonBase && isHumanName(commonBase) ? commonBase : null) ??
-		(orchestrator ? agentDisplayName(orchestrator) : null) ??
-		"Mesh Group";
-	const label =
-		labelCandidate === "Agent" ? (commonBase && isHumanName(commonBase) ? commonBase : "Mesh Group") : labelCandidate;
+	const label = groupDisplayLabel(orchestrator, members);
 	const parents = commsParents(members, messages, orchestrator?.id ?? null);
 	const roles = new Map<string, MeshNode["role"]>();
 	for (const member of members) {
@@ -417,11 +390,7 @@ function cwdGroups(members: AgentRow[]): {
 			parents.set(member.id, parentId);
 			roles.set(member.id, "subordinate");
 		}
-		const rootBase = basename(root.cwd);
-		const label =
-			(root.session_name && isHumanName(root.session_name, root) ? root.session_name.trim() : null) ??
-			(rootBase && isHumanName(rootBase) ? rootBase : null) ??
-			"Mesh Group";
+		const label = groupDisplayLabel(root, component);
 		groups.push({
 			groupId: root.id,
 			label,
