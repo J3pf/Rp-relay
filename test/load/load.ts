@@ -127,11 +127,11 @@ async function main() {
 		});
 		res.rssMb = rss();
 		console.log(JSON.stringify(res, null, 2));
-		const ok = res.latencyMs.p99 < Number(values.p99) && res.lostFinals === 0;
+		const ok = res.latencyMs.p99 < Number(values.p99) && res.lostFinals === 0 && res.aggregateEventsPerSec > 400;
 		console.log(
 			ok
-				? `OK: p99 ${res.latencyMs.p99} ms < ${values.p99} ms y sin pérdidas de eventos finales`
-				: `FALLO: p99 ${res.latencyMs.p99} ms (objetivo < ${values.p99} ms), finales perdidos: ${res.lostFinals}`,
+				? `OK: p99 ${res.latencyMs.p99} ms < ${values.p99} ms, throughput ${res.aggregateEventsPerSec} ev/s > 400 ev/s y sin pérdidas de eventos finales`
+				: `FALLO: p99 ${res.latencyMs.p99} ms (objetivo < ${values.p99} ms), throughput ${res.aggregateEventsPerSec} ev/s, finales perdidos: ${res.lostFinals}`,
 		);
 		process.exitCode = ok ? 0 : 1;
 	} finally {

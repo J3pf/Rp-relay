@@ -30,11 +30,10 @@ describe("carga (humo en CI; la prueba completa es `npm run test:load`)", () => 
 				};
 			},
 		});
-		expect(res.aggregateEventsPerSec).toBeGreaterThan(400);
+		// Correctness only in CI/smoke: zero lost final events, message delivery ratio, and database persistence.
+		// Wall-clock performance (throughput > 400 ev/s and latency p99 < 50ms) is measured via `npm run test:load` on an idle machine.
 		expect(res.lostFinals).toBe(0);
 		expect(res.received).toBeGreaterThan(res.expectedReceived * 0.99);
-		// objetivo del plan: p99 < 50 ms en 1 vCPU; aquí relay + generador comparten proceso y CPU, margen amplio
-		expect(res.latencyMs.p99).toBeLessThan(500);
 		// persistencia: los finales (10 %) están en la base
 		const n = t.relay.db.prepare("SELECT COUNT(*) AS n FROM events WHERE type='message_end'").get() as { n: number };
 		expect(n.n).toBeGreaterThan(0);
