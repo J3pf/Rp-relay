@@ -9,8 +9,17 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ### Improvements & Fixes (Agent Mesh & Display Names)
 - **Human-Friendly Agent Display Names:** Introduced shared pure helper `agentDisplayName(agent)` applied consistently across topology node names, group labels, communication `fromName`/`toName`, and prompt summaries. Raw session IDs, UUIDs, ULIDs, hex hashes, and automated subagent names (`subagent-chat-<hex>`) are strictly rejected in favor of human session names, `basename(cwd)`, or the `"Agent"` fallback.
+- **Consistent Display Names Across Graph and Comms:** Resolved consistency bug so `fromName`/`toName` in live WebSocket `mesh.comm` events, HTTP `/v1/mesh/conversation`, `/v1/mesh/agents/:agentId/comms`, and prompt `agentLabel` match the agent's disambiguated node name in the snapshot (`"Rp-app (2)"`).
 - **Deterministic Duplicate Disambiguation:** Duplicate agent display names residing on the same machine within a snapshot are deterministically disambiguated (`"Rp-app"`, `"Rp-app (2)"`, `"Rp-app (3)"`) ordered stably by `first_seen_at` ascending and tie-broken by `agentId`. Agents on separate machines remain unsuffixed.
-- **Human Group Labels:** Group chip labels resolve to the orchestrator's display name or common working directory basename, never falling back to a raw UUID or session ID.
+- **Unified Pure Group Display Helper:** Refactored group label resolution into pure `groupDisplayLabel(orchestrator, members)` helper in `src/domain/agentNames.ts` with explicit precedence: human orchestrator session name → common cwd basename → orchestrator display name → `"Mesh Group"`. Supports monorepo structures (e.g. orchestrator in `RP` with members in `RP/Rp-app`, `RP/Rp-relay` → `"RP"`).
+- **Preserve Hex-Like Human Names:** Adjusted hex identifier heuristics to require digits for hyphenated hex strings, ensuring legitimate words like `cafe-api`, `add-feed`, `Rp-app`, and `dead-beef` are not misclassified as machine IDs.
+- **Deterministic Load Smoke Test:** Fixed load generator throughput calculation to measure elapsed time strictly during active event generation rather than including the post-generation socket drain delay, preventing load-sensitive CI flakiness.
+- **Dependency Upgrades to Latest Stable:**
+  - Fastify plugins: `@fastify/multipart` (9.4.0 → 10.1.4), `@fastify/rate-limit` (10.3.0 → 11.2.1), `@fastify/type-provider-typebox` (5.2.0 → 6.3.0).
+  - Database: `better-sqlite3` (12.11.1 → 13.0.3), `@types/better-sqlite3` (7.6.13 → 9.6.0).
+  - Logging & Push: `pino` (9.14.0 → 10.4.0), `firebase-admin` (13.10.0 → 14.5.0).
+  - Toolchain: `typescript` (5.9.3 → 7.0.2), `vitest` (3.2.7 → 5.0.5). Configured `maxWorkers: 4` in `vitest.config.ts`.
+  - Node engine alignment: `@types/node` maintained on v22 (`^22.20.5`) aligned with `"engines": { "node": ">=22" }`.
 - **Wire Contract Preservation:** All protocol schemas and payload structures remain 100% backward-compatible with unchanged field types.
 
 ## [0.5.2] - 2026-10-17
