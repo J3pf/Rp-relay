@@ -309,6 +309,14 @@ Semántica de topología, persistencia y conversación:
 8. **Pregunta pendiente:** `pendingAsk` indica un `ask` sin un `reply` coincidente.
 9. **Redacción:** la redacción sólo anula `text` (y, por consiguiente, `lastPreview` / `CommView.text`). `peer`, `messageId`, `replyTo` y `expectsReply` permanecen visibles para conservar la topología del grafo.
 10. **Paginación:** `nextBefore` es el `at` del elemento más antiguo devuelto y sirve como cursor exclusivo (`at < nextBefore` para la página siguiente); es `null` cuando no hay más páginas.
+11. **Display Names and Group Labels (UX/UI Rules):**
+    - **Single Pure Helper (`agentDisplayName`):** All node names (`MeshNode.name`), group labels (`MeshGroup.label`), communication participant names (`CommView.fromName`, `CommView.toName`), and prompt agent labels (`Prompt.agentLabel`) resolve via a unified precedence rule:
+      1. `session_name` if it is a genuine human name (not null/empty, not equal to `session_id` or `agent.id`, not a UUID/ULID, not a hex ID string of length ≥ 8, and not an automated prefix such as `subagent-chat-<hex>`).
+      2. Directory basename `basename(cwd)` if present, non-root, and valid.
+      3. Fallback string `"Agent"`.
+    - **Raw ID Rejection:** Raw session IDs, UUIDs, ULIDs, and hex hashes are never returned as user-facing names.
+    - **Deterministic Duplicate Disambiguation:** When multiple agents on the same machine resolve to the same base display name within a snapshot, they are disambiguated deterministically: `"Name"`, `"Name (2)"`, `"Name (3)"`, ordered stably by `first_seen_at` ascending and tie-broken by `agentId`. Agents on distinct machines remain unsuffixed.
+    - **Group Labels:** Group chip labels resolve to the orchestrator's display name, or the common directory basename of member agents, or `"Mesh Group"`. Never a raw ID.
 
 ## 7. HTTP API (`/v1`)
 
