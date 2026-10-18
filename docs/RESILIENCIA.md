@@ -116,7 +116,7 @@ pub/sub) sin cambiar el protocolo. No se construye ahora.
 - **CI / Smoke Test (`test/load-smoke.test.ts` via `npm test`):**
   Designed to execute reliably across heterogeneous CI environments and under high host CPU contention (load average ≥ 16). Asserts functional correctness: zero lost final events (`lostFinals === 0`), expected delivery ratio (`received ≥ expectedReceived * 0.99`), and SQLite persistence of final messages (`message_end`). It avoids asserting wall-clock throughput or latency thresholds that fluctuate under system load.
 - **Dedicated Load Benchmark (`npm run test:load`):**
-  Intended to run on an idle machine or dedicated benchmark environment. Asserts target wall-clock performance: aggregate throughput (`aggregateEventsPerSec > 400`) and message forwarding latency (`latencyMs.p99 < 50` ms by default).
+  Intended to run on an idle machine or dedicated benchmark environment. Asserts target wall-clock performance dynamically derived from run parameters: aggregate throughput must satisfy `aggregateEventsPerSec >= expected * TARGET_THROUGHPUT_RATIO` (where `expected = agents * rate` and `TARGET_THROUGHPUT_RATIO = 0.95`), alongside message forwarding latency (`latencyMs.p99 < 50` ms by default).
 
 ## 5. Específico por sistema operativo
 
