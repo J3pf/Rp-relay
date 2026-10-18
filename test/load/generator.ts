@@ -117,10 +117,10 @@ export async function runLoad(o: LoadOptions): Promise<LoadResult> {
 
 	log(`generando ${o.agents} agentes × ${o.rate} ev/s durante ${o.durationSec} s con ${o.apps} apps…`);
 	const tickMs = 50;
-	const perTick = (o.rate * tickMs) / 1000;
 	let sent = 0;
 	let carry = 0;
 	const started = Date.now();
+	let lastTick = started;
 	let sendEnded = started;
 	const startReceived = received;
 	await new Promise<void>((resolve) => {
@@ -132,9 +132,12 @@ export async function runLoad(o: LoadOptions): Promise<LoadResult> {
 				resolve();
 				return;
 			}
-			carry += perTick;
+			const deltaMs = Math.max(1, now - lastTick);
+			lastTick = now;
+			carry += (o.rate * deltaMs) / 1000;
 			const n = Math.floor(carry);
 			carry -= n;
+			if (n <= 0) return;
 			for (const ag of agentSockets) {
 				for (let k = 0; k < n; k++) {
 					ag.seq++;
