@@ -8,3 +8,4 @@ coverage/
 *.db-shm
 /tmp/
 .pi/
+.vitest/
