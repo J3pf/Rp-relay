@@ -5,6 +5,14 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.5.3] - 2026-10-18
+
+### Improvements & Fixes (Agent Mesh & Display Names)
+- **Human-Friendly Agent Display Names:** Introduced shared pure helper `agentDisplayName(agent)` applied consistently across topology node names, group labels, communication `fromName`/`toName`, and prompt summaries. Raw session IDs, UUIDs, ULIDs, hex hashes, and automated subagent names (`subagent-chat-<hex>`) are strictly rejected in favor of human session names, `basename(cwd)`, or the `"Agent"` fallback.
+- **Deterministic Duplicate Disambiguation:** Duplicate agent display names residing on the same machine within a snapshot are deterministically disambiguated (`"Rp-app"`, `"Rp-app (2)"`, `"Rp-app (3)"`) ordered stably by `first_seen_at` ascending and tie-broken by `agentId`. Agents on separate machines remain unsuffixed.
+- **Human Group Labels:** Group chip labels resolve to the orchestrator's display name or common working directory basename, never falling back to a raw UUID or session ID.
+- **Wire Contract Preservation:** All protocol schemas and payload structures remain 100% backward-compatible with unchanged field types.
+
 ## [0.5.2] - 2026-10-17
 
 ### Mejoras y Correcciones (Agent Mesh & Infraestructura)
