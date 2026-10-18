@@ -121,12 +121,14 @@ export async function runLoad(o: LoadOptions): Promise<LoadResult> {
 	let sent = 0;
 	let carry = 0;
 	const started = Date.now();
+	let sendEnded = started;
 	const startReceived = received;
 	await new Promise<void>((resolve) => {
 		const timer = setInterval(() => {
 			const now = Date.now();
 			if (now - started >= o.durationSec * 1000) {
 				clearInterval(timer);
+				sendEnded = Date.now();
 				resolve();
 				return;
 			}
@@ -154,13 +156,13 @@ export async function runLoad(o: LoadOptions): Promise<LoadResult> {
 			}
 		}, tickMs);
 	});
+	const sendDurationSec = Math.max(0.001, (sendEnded - started) / 1000);
 	await new Promise((r) => setTimeout(r, 1000)); // drenaje
 
 	let lostFinals = 0;
 	for (let a = 0; a < o.apps; a++)
 		for (const ag of agentSockets) lostFinals += ag.finalsSent - (finalsSeen.get(`${a}:${ag.agentId}`)?.size ?? 0);
 	lat.sort((x, y) => x - y);
-	const elapsed = (Date.now() - started) / 1000;
 	for (const ws of [...appSockets, ...agentSockets.map((a) => a.ws)]) ws.close();
 	return {
 		agents: o.agents,
@@ -175,6 +177,6 @@ export async function runLoad(o: LoadOptions): Promise<LoadResult> {
 			p99: percentile(lat, 99),
 			max: lat[lat.length - 1] ?? 0,
 		},
-		aggregateEventsPerSec: Math.round(sent / elapsed),
+		aggregateEventsPerSec: Math.round(sent / sendDurationSec),
 	};
 }
