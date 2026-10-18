@@ -2,6 +2,7 @@ import { type CommView, envelope, type MeshSnapshot, type SubagentUpdateEvent, t
 import type { Ctx } from "../../context.js";
 import type { CommRow } from "../../db/repos/comms.js";
 import type { AppConn } from "../../ws/conn.js";
+import { agentDisplayName } from "../agentNames.js";
 import { buildMeshSnapshot } from "./topology.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -152,8 +153,8 @@ export class MeshService {
 			commKey: comm.comm_id,
 			fromAgentId: senderId,
 			toAgentId: receiverId,
-			fromName: sender.session_name || sender.session_id || sender.id,
-			toName: receiver.session_name || receiver.session_id || receiver.id,
+			fromName: agentDisplayName(sender),
+			toName: agentDisplayName(receiver),
 			action: comm.action,
 			text: sender.redacted ? null : comm.text,
 			truncated: Boolean(comm.truncated),

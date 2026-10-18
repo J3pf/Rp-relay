@@ -3,6 +3,7 @@ import type { MeshGroup, MeshNode, MeshSnapshot, SubagentUpdateEvent, TodoTask }
 import type { AgentRow } from "../../db/repos/agents.js";
 import type { CommRow } from "../../db/repos/comms.js";
 import type { MachineRow } from "../../db/repos/machines.js";
+import { agentDisplayName, basename, disambiguateAgentNames, isHumanName } from "../agentNames.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_MS = 20_000;
@@ -213,10 +214,6 @@ function latestSubagents(events: SubagentUpdateEvent[] | undefined): MeshNode["s
 		});
 }
 
-function nodeName(agent: AgentRow): string {
-	return agent.session_name || agent.session_id || agent.id;
-}
-
 function compareInitiators(
 	a: AgentRow,
 	b: AgentRow,
@@ -322,7 +319,16 @@ function commsGroup(
 	const orchestrator = eligible[0] ?? null;
 	const memberIds = members.map((member) => member.id).sort();
 	const groupId = orchestrator?.id ?? `group-${memberIds[0]}`;
-	const label = orchestrator?.session_name || posix.basename(commonCwd(members) ?? "") || "Mesh Group";
+	const commonBase = basename(commonCwd(members));
+	const labelCandidate =
+		(orchestrator?.session_name && isHumanName(orchestrator.session_name, orchestrator)
+			? orchestrator.session_name.trim()
+			: null) ??
+		(commonBase && isHumanName(commonBase) ? commonBase : null) ??
+		(orchestrator ? agentDisplayName(orchestrator) : null) ??
+		"Mesh Group";
+	const label =
+		labelCandidate === "Agent" ? (commonBase && isHumanName(commonBase) ? commonBase : "Mesh Group") : labelCandidate;
 	const parents = commsParents(members, messages, orchestrator?.id ?? null);
 	const roles = new Map<string, MeshNode["role"]>();
 	for (const member of members) {
@@ -411,9 +417,14 @@ function cwdGroups(members: AgentRow[]): {
 			parents.set(member.id, parentId);
 			roles.set(member.id, "subordinate");
 		}
+		const rootBase = basename(root.cwd);
+		const label =
+			(root.session_name && isHumanName(root.session_name, root) ? root.session_name.trim() : null) ??
+			(rootBase && isHumanName(rootBase) ? rootBase : null) ??
+			"Mesh Group";
 		groups.push({
 			groupId: root.id,
-			label: root.session_name || posix.basename(posix.normalize(root.cwd!)) || "Mesh Group",
+			label,
 			orchestratorAgentId: root.id,
 			machineIds: [...new Set(component.map((agent) => agent.machine_id))].sort(),
 			memberAgentIds: memberIds,
@@ -435,6 +446,7 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 		})
 		.sort((a, b) => a.id.localeCompare(b.id));
 	const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+	const disambiguatedNames = disambiguateAgentNames(agents);
 	const recentComms = options.comms.filter((comm) => comm.at >= now - DAY_MS);
 	const messages = deduplicateMessages(recentComms, new Set(agentsById.keys()));
 	const edgesById = new Map<string, InternalEdge>();
@@ -534,7 +546,7 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 			machineId: agent.machine_id,
 			machineName: machine?.name ?? agent.machine_id,
 			machineColor: machine?.color ?? "#808080",
-			name: nodeName(agent),
+			name: disambiguatedNames.get(agent.id) ?? agentDisplayName(agent),
 			cwd: agent.cwd,
 			gitBranch: agent.git_branch,
 			model: agent.model,

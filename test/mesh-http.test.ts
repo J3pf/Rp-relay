@@ -378,4 +378,66 @@ describe("HTTP mesh routes", () => {
 		expect(snap2.json.nodes.map((n: { agentId: string }) => n.agentId)).toEqual([agentA.agentId]);
 		expect(snap2.json.nodes.map((n: { agentId: string }) => n.agentId)).not.toContain(agentB.agentId);
 	});
+
+	it("never returns raw UUIDs or auto names in node names, group labels, fromName, or toName", async () => {
+		const device = await pairDevice(t);
+		const machine = await pairMachine(t, "mesh-uuid-pc");
+		const uuidA = "01a14fbb-44e3-765f-99e1-970655bf47bf";
+		const uuidB = "01a14fbb-2812-7332-aae5-d003f17b8fe7";
+		const agentA = await connectAgent(t, machine, uuidA, {
+			session: { id: uuidA, file: null, name: uuidA },
+			cwd: "/workspace/backend",
+		});
+		const agentB = await connectAgent(t, machine, uuidB, {
+			session: { id: uuidB, file: null, name: "subagent-chat-01a14fbb-44e3" },
+			cwd: "/workspace/frontend",
+		});
+		recordComm(agentA, agentB, { commId: "uuid-comm-1", at: Date.now() });
+		await waitForComms(agentA.agentId, 1);
+
+		const snapRes = await api(t, "GET", "/v1/mesh", device.deviceToken);
+		expect(snapRes.status).toBe(200);
+
+		const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+		for (const n of snapRes.json.nodes) {
+			expect(uuidRegex.test(n.name)).toBe(false);
+			expect(n.name.startsWith("subagent-chat-")).toBe(false);
+		}
+		for (const group of snapRes.json.groups) {
+			expect(uuidRegex.test(group.label)).toBe(false);
+			expect(group.label.startsWith("subagent-chat-")).toBe(false);
+		}
+
+		const commsRes = await api(
+			t,
+			"GET",
+			`/v1/mesh/agents/${encodeURIComponent(agentA.agentId)}/comms`,
+			device.deviceToken,
+		);
+		expect(commsRes.status).toBe(200);
+		for (const item of commsRes.json.items) {
+			expect(uuidRegex.test(item.fromName)).toBe(false);
+			expect(uuidRegex.test(item.toName)).toBe(false);
+			expect(item.fromName.startsWith("subagent-chat-")).toBe(false);
+			expect(item.toName.startsWith("subagent-chat-")).toBe(false);
+		}
+
+		const convRes = await api(
+			t,
+			"GET",
+			`/v1/mesh/conversation?a=${encodeURIComponent(agentA.agentId)}&b=${encodeURIComponent(agentB.agentId)}`,
+			device.deviceToken,
+		);
+		expect(convRes.status).toBe(200);
+		for (const item of convRes.json.items) {
+			expect(uuidRegex.test(item.fromName)).toBe(false);
+			expect(uuidRegex.test(item.toName)).toBe(false);
+			expect(item.fromName.startsWith("subagent-chat-")).toBe(false);
+			expect(item.toName.startsWith("subagent-chat-")).toBe(false);
+		}
+
+		agentA.client.close();
+		agentB.client.close();
+		await Promise.all([agentA.client.waitClosed(), agentB.client.waitClosed()]);
+	});
 });

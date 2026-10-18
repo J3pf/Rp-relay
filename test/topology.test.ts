@@ -253,6 +253,61 @@ describe("buildMeshSnapshot", () => {
 		expect(node(result, "solo")).toMatchObject({ role: "solo", parentAgentId: null, groupId: null });
 	});
 
+	it("assigns human display names to nodes and disambiguates duplicates on the same machine", () => {
+		const a1 = agent("a1", {
+			machine_id: "machine-1",
+			session_name: "01a14fbb-44e3-765f-99e1-970655bf47bf",
+			cwd: "/workspace/Rp-app",
+			first_seen_at: 100,
+		});
+		const a2 = agent("a2", {
+			machine_id: "machine-1",
+			session_name: "subagent-chat-01a14fbb-44e3-765f",
+			cwd: "/workspace/Rp-app",
+			first_seen_at: 200,
+		});
+		const a3 = agent("a3", {
+			machine_id: "machine-2",
+			session_name: null,
+			cwd: "/workspace/Rp-app",
+			first_seen_at: 150,
+		});
+
+		const result = snapshot([a1, a2, a3]);
+		expect(node(result, "a1").name).toBe("Rp-app");
+		expect(node(result, "a2").name).toBe("Rp-app (2)");
+		expect(node(result, "a3").name).toBe("Rp-app");
+
+		const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+		for (const n of result.nodes) {
+			expect(uuidRegex.test(n.name)).toBe(false);
+		}
+	});
+
+	it("never assigns a UUID or auto-name as a group label and falls back cleanly", () => {
+		const orchestrator = agent("orch", {
+			session_name: "01a14fbb-44e3-765f-99e1-970655bf47bf",
+			cwd: "/workspace/project/backend",
+		});
+		const subordinate = agent("sub", {
+			session_name: "subagent-chat-01a14fbb-44e3-765f",
+			cwd: "/workspace/project/frontend",
+		});
+		const result = snapshot([orchestrator, subordinate], [comm("orch", "sub")]);
+		expect(result.groups).toHaveLength(1);
+		expect(result.groups[0]?.label).toBe("project");
+
+		const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+		for (const g of result.groups) {
+			expect(uuidRegex.test(g.label)).toBe(false);
+			expect(g.label.startsWith("subagent-chat-")).toBe(false);
+		}
+		for (const n of result.nodes) {
+			expect(uuidRegex.test(n.name)).toBe(false);
+			expect(n.name.startsWith("subagent-chat-")).toBe(false);
+		}
+	});
+
 	it("falls back to same-machine cwd ancestor groups when agents have no comms", () => {
 		const root = agent("root", { cwd: "/repo", session_name: "Project", first_seen_at: 1 });
 		const middle = agent("middle", { cwd: "/repo/packages" });

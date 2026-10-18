@@ -10,6 +10,7 @@ import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
 import type { CommRow } from "../../db/repos/comms.js";
+import { agentDisplayName } from "../../domain/agentNames.js";
 import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
 
@@ -67,16 +68,26 @@ function toCommViews(comms: CommRow[], c: () => Ctx): CommView[] {
 		const receiverId = comm.direction === "out" ? comm.peer_agent_id : comm.agent_id;
 		const sender = agent(senderId);
 		const receiver = agent(receiverId);
-		const senderFallback = senderId ?? comm.peer_session_id ?? comm.peer_name ?? "";
-		const receiverFallback = receiverId ?? comm.peer_session_id ?? comm.peer_name ?? "";
+		const senderCandidate = sender ?? {
+			session_name: comm.direction === "in" ? comm.peer_name : null,
+			session_id: comm.direction === "in" ? comm.peer_session_id : null,
+			cwd: comm.direction === "in" ? comm.peer_cwd : null,
+			id: senderId,
+		};
+		const receiverCandidate = receiver ?? {
+			session_name: comm.direction === "out" ? comm.peer_name : null,
+			session_id: comm.direction === "out" ? comm.peer_session_id : null,
+			cwd: comm.direction === "out" ? comm.peer_cwd : null,
+			id: receiverId,
+		};
 		const senderGroupId = snapshot.nodes.find((node) => node.agentId === senderId)?.groupId;
 		const receiverGroupId = snapshot.nodes.find((node) => node.agentId === receiverId)?.groupId;
 		return {
 			commKey: comm.comm_id,
 			fromAgentId: senderId,
 			toAgentId: receiverId,
-			fromName: sender?.session_name || sender?.session_id || senderFallback,
-			toName: receiver?.session_name || receiver?.session_id || receiverFallback,
+			fromName: agentDisplayName(senderCandidate),
+			toName: agentDisplayName(receiverCandidate),
 			action: comm.action,
 			text: sender?.redacted ? null : comm.text,
 			truncated: Boolean(comm.truncated),

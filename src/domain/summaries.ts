@@ -1,6 +1,7 @@
 import type { AgentSummary, MachineQuota, MachineSummary, Prompt, PromptOpen } from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
 import type { AgentRow, MachineRow, PromptRow } from "../db/repos/index.js";
+import { agentDisplayName, basename } from "./agentNames.js";
 
 const parse = <T>(s: string | null): T | null => {
 	if (!s) return null;
@@ -11,17 +12,13 @@ const parse = <T>(s: string | null): T | null => {
 	}
 };
 
-export function basename(p: string | null | undefined): string | null {
-	if (!p) return null;
-	const parts = p.split(/[\\/]/).filter(Boolean);
-	return parts.length ? parts[parts.length - 1]! : null;
-}
+export { basename };
 
 export class Summaries {
 	constructor(private c: () => Ctx) {}
 
 	agentLabel(a: AgentRow): string {
-		return a.session_name || basename(a.cwd) || a.id.split(":").pop()!.slice(0, 8);
+		return agentDisplayName(a);
 	}
 
 	machine(
@@ -95,7 +92,7 @@ export class Summaries {
 			machineId: a?.machine_id ?? "",
 			machineName: m?.name ?? "",
 			machineContext: m?.context ?? "personal",
-			agentLabel: a ? this.agentLabel(a) : p.agent_id,
+			agentLabel: a ? this.agentLabel(a) : agentDisplayName({ id: p.agent_id }),
 		};
 	}
 
