@@ -23,3 +23,15 @@ With v0.5.3:
   - Toolchain: `typescript` (7.0.2), `vitest` (5.0.5).
   - Node engine alignment: `@types/node` maintained on v22 (`^22.20.5`) aligned with `"engines": { "node": ">=22" }`.
 - **Wire Contract Preservation:** Wire contracts and protocol schemas remain 100% backward-compatible.
+
+## Known Issues
+- `npm audit` reports GHSA-86w9-cpqp-85rv (high) in `node-forge` via the optional dependency `acme-client` 5.4.0. Both packages are already at their latest stable versions and no patched release of `node-forge` is available yet upstream. npm's automated suggestion to downgrade to `acme-client` 2.1.0 breaks modern ACME features and is intentionally not applied. This vulnerability is pre-existing and only relevant when ACME automatic TLS certificate provisioning is enabled.
+
+## Upgrade
+To upgrade an existing installation:
+
+```bash
+sudo npm i -g https://github.com/J3pf/Rp-relay/releases/download/v0.5.3/j3pf-rp-relay-0.5.3.tgz && sudo systemctl restart rp-relay
+```
+
+The graceful shutdown signals connected clients with code `1012`, prompting them to reconnect immediately and seamlessly.

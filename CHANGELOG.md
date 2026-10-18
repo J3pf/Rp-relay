@@ -21,6 +21,8 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
   - Toolchain: `typescript` (5.9.3 → 7.0.2), `vitest` (3.2.7 → 5.0.5). Configured `maxWorkers: 4` in `vitest.config.ts`.
   - Node engine alignment: `@types/node` maintained on v22 (`^22.20.5`) aligned with `"engines": { "node": ">=22" }`.
 - **Wire Contract Preservation:** All protocol schemas and payload structures remain 100% backward-compatible with unchanged field types.
+- **Known Issues:** `npm audit` reports GHSA-86w9-cpqp-85rv (high) in `node-forge` via optional dependency `acme-client` 5.4.0 (both already latest stable; no upstream patch exists yet in node-forge; npm's suggested downgrade to acme-client 2.1.0 is not applied). Only relevant when ACME automatic TLS is configured.
+- **Upgrade:** `sudo npm i -g https://github.com/J3pf/Rp-relay/releases/download/v0.5.3/j3pf-rp-relay-0.5.3.tgz && sudo systemctl restart rp-relay`.
 
 ## [0.5.2] - 2026-10-17
 
