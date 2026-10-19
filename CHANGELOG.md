@@ -5,6 +5,28 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.5.4] - 2026-10-19
+
+### Performance & Database
+- **Composite Indexes for Mesh & Comms (credit: Luis Chacón):** Added migration `0004_perf_indexes.sql` creating composite indexes (`events_agent_epoch_type_seq`, `comms_agent_at`, `comms_peer_at`, `comms_pair_at`) to optimize mesh event streaming, conversation queries, and peer comm lookups. Uses `CREATE INDEX IF NOT EXISTS` for safe, idempotent online schema migrations without table rewrites.
+- **Optimized Mesh Rebuilds & Prompt Batching (credit: Luis Chacón):** Avoids full snapshot recalculations when deriving prompt agent labels. Prompt lookups now batch agent disambiguation per machine (`Summaries.openPrompts`). Optimized topology connected components with set-based lookups and single-pass edge message counts.
+- **Unresolved Comms Scan Optimization (credit: Luis Chacón):** Added early exit in `resolveUnresolvedComms` to skip scanning the full agent list when no pending unresolved communications exist.
+
+### Test Architecture & Reliability
+- **Deterministic CI Smoke Suite:** Scoped `test/load-smoke.test.ts` to functional correctness invariants (zero lost final messages, delivery integrity >= 99%, SQLite persistence) to guarantee 100% deterministic CI runs under high host CPU contention (load average >= 16).
+- **Dynamic Throughput Benchmark:** Moved wall-clock throughput and latency thresholds to dedicated benchmark `npm run test:load`, deriving target throughput dynamically (`aggregateEventsPerSec >= expected * TARGET_THROUGHPUT_RATIO`, with `TARGET_THROUGHPUT_RATIO = 0.95`).
+- **Dynamic Prompt Label Verification:** Added integration test proving that newly registered duplicate agents immediately update prompt labels and comm names dynamically without returning stale cached values.
+
+### Known Issues & Security
+- **Node-Forge Vulnerability:** `npm audit` reports GHSA-86w9-cpqp-85rv (high) in `node-forge` via optional dependency `acme-client` 5.4.0 (both packages are at their latest stable releases; no upstream patch exists yet in node-forge; npm's suggested downgrade to acme-client 2.1.0 is not applied). Only relevant when ACME automatic TLS certificate provisioning is enabled.
+
+### Upgrade
+- Upgrade existing installations via:
+  ```bash
+  sudo npm i -g https://github.com/J3pf/Rp-relay/releases/download/v0.5.4/j3pf-rp-relay-0.5.4.tgz && sudo systemctl restart rp-relay
+  ```
+  Migration `0004` will be applied automatically on service startup.
+
 ## [0.5.3] - 2026-10-18
 
 ### Improvements & Fixes (Agent Mesh & Display Names)

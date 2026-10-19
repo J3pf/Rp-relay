@@ -2,7 +2,7 @@
 # Instalador nativo de rp-relay para Ubuntu Server 22.04 / 24.04 (Opción A / A2).
 #
 #   sudo ./install.sh --public-url https://relay.midominio.com [--caddy] [--name "Servidor casa"]
-#                     [--version 0.5.3] [--from ./j3pf-rp-relay-0.5.3.tgz] [--port 8787]
+#                     [--version 0.5.4] [--from ./j3pf-rp-relay-0.5.4.tgz] [--port 8787]
 #
 # Es idempotente: se puede volver a ejecutar para actualizar. No toca config.json si ya existe.
 set -euo pipefail
@@ -67,8 +67,8 @@ install -d -o root -g rp-relay -m 750 /etc/rp-relay
 # 3. Paquete
 if [[ -z "$FROM" ]]; then
   TAG="${VERSION}"
-  if [[ "$TAG" == "latest" || "$TAG" == "0.5.3" || "$TAG" == "v0.5.3" ]]; then
-    FROM="https://github.com/J3pf/Rp-relay/releases/download/v0.5.3/j3pf-rp-relay-0.5.3.tgz"
+  if [[ "$TAG" == "latest" || "$TAG" == "0.5.4" || "$TAG" == "v0.5.4" ]]; then
+    FROM="https://github.com/J3pf/Rp-relay/releases/download/v0.5.4/j3pf-rp-relay-0.5.4.tgz"
   else
     V_NUM="${TAG#v}"
     FROM="https://github.com/J3pf/Rp-relay/releases/download/v${V_NUM}/j3pf-rp-relay-${V_NUM}.tgz"

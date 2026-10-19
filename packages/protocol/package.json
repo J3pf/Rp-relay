@@ -1,6 +1,6 @@
 {
   "name": "@j3pf/rp-protocol",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Esquemas TypeBox del protocolo RP v1 (Plugin ⇄ Relay ⇄ App) y fixtures de contrato",
   "type": "module",
   "main": "dist/index.js",

@@ -103,9 +103,7 @@ describe("migration 0004_perf_indexes", () => {
 
 		// Query C: CommsRepo lookups by peer_agent_id
 		const explainCommsPeer = db
-			.prepare(
-				"EXPLAIN QUERY PLAN SELECT * FROM comms WHERE peer_agent_id=? ORDER BY at DESC, comm_id DESC LIMIT 50",
-			)
+			.prepare("EXPLAIN QUERY PLAN SELECT * FROM comms WHERE peer_agent_id=? ORDER BY at DESC, comm_id DESC LIMIT 50")
 			.all("m-1:agent-b") as { detail: string }[];
 		const commsPeerDetail = explainCommsPeer.map((r) => r.detail).join(" ");
 		expect(commsPeerDetail).toContain("comms_peer_at");
