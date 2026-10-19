@@ -171,7 +171,17 @@ export class AgentService {
 		let agentChanged = false;
 		let storedComm: CommRow | undefined;
 		const persisted = isPersistedEvent(e.type);
-		const shouldTouch = now - (conn.lastTouchAt ?? 0) >= 30_000;
+		const isActivityEvent = [
+			"message_start",
+			"message_delta",
+			"message_end",
+			"user_message",
+			"tool_execution_start",
+			"tool_execution_end",
+			"agent_start",
+			"comm",
+		].includes(e.type);
+		const shouldTouch = isActivityEvent && now - (conn.lastTouchAt ?? 0) >= 15_000;
 
 		const applyDbWrites = () => {
 			if (persisted) {
