@@ -20,12 +20,7 @@ import {
 } from "./helpers.js";
 
 const ROOT = join(import.meta.dirname, "..");
-const CLI_BIN = existsSync(join(ROOT, "dist/cli/index.js"))
-	? process.execPath
-	: join(ROOT, "node_modules", ".bin", "tsx");
-const CLI_SCRIPT = existsSync(join(ROOT, "dist/cli/index.js"))
-	? join(ROOT, "dist/cli/index.js")
-	: join(ROOT, "src/cli/index.ts");
+const TSX = join(ROOT, "node_modules", ".bin", "tsx");
 
 // asíncrono: el relay de la prueba corre en este mismo proceso y no debe quedar bloqueado mientras el CLI le habla
 function cli(
@@ -34,8 +29,8 @@ function cli(
 ): Promise<{ code: number | null; out: string; err: string }> {
 	return new Promise((resolve) => {
 		execFile(
-			CLI_BIN,
-			[CLI_SCRIPT, ...args],
+			TSX,
+			[join(ROOT, "src/cli/index.ts"), ...args],
 			{ encoding: "utf8", env: { ...process.env, NO_COLOR: "1", ...env }, timeout: 60_000 },
 			(error, stdout, stderr) => {
 				resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, out: stdout, err: stderr });
@@ -194,6 +189,7 @@ describe("CLI sin el relay en marcha", () => {
 		expect(r.err).toContain("no está en marcha");
 	});
 
+	// 120s timeout justified by sequential process-spawn cost (7 separate CLI executions) under machine contention
 	it("backup now/list y restore (relay parado)", { timeout: 120_000 }, async () => {
 		const b = await cli(["backup", "now"], env);
 		expect(b.code).toBe(0);
@@ -209,6 +205,7 @@ describe("CLI sin el relay en marcha", () => {
 		expect(ok.out).toContain("pre-restore");
 	});
 
+	// 120s timeout justified by 4 sequential CLI process invocations under machine contention
 	it("migrate, version, ayuda y comando desconocido", { timeout: 120_000 }, async () => {
 		const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string };
 		expect((await cli(["migrate"], env)).out).toContain("Sin migraciones pendientes");
@@ -219,7 +216,7 @@ describe("CLI sin el relay en marcha", () => {
 		expect(u.err).toContain("comando desconocido");
 	});
 
-	it("doctor sin relay: la URL pública no responde → fallo, el resto bien", { timeout: 120_000 }, async () => {
+	it("doctor sin relay: la URL pública no responde → fallo, el resto bien", async () => {
 		const r = await cli(["doctor"], env);
 		expect(r.code).toBe(1);
 		expect(r.out).toContain("publicUrl alcanzable");
@@ -227,6 +224,7 @@ describe("CLI sin el relay en marcha", () => {
 	});
 });
 
+// 120s timeout justified by relay startup, WS handshakes, and multiple sequential CLI commands in each test
 describe("CLI contra el relay en marcha (API de administración)", { timeout: 120_000 }, () => {
 	let t: TestRelay;
 	const withServer = async (fn: () => Promise<void>) => {
@@ -238,7 +236,6 @@ describe("CLI contra el relay en marcha (API de administración)", { timeout: 12
 			await fn();
 		} finally {
 			await t.stop();
-			await sleep(50);
 		}
 	};
 
