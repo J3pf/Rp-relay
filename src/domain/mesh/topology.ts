@@ -432,9 +432,10 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 	const roleByAgent = new Map<string, MeshNode["role"]>();
 	const parentByAgent = new Map<string, string | null>();
 	for (const ids of components) {
+		const idSet = new Set(ids);
 		const members = ids.map((id) => agentsById.get(id)!).filter(Boolean);
 		const componentMessages = messages.filter(
-			(message) => ids.includes(message.fromAgentId) && ids.includes(message.toAgentId),
+			(message) => idSet.has(message.fromAgentId) && idSet.has(message.toAgentId),
 		);
 		const topology = commsGroup(members, componentMessages);
 		groups.push(topology.group);
@@ -448,11 +449,14 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 	const noComms = agents.filter((agent) => !groupIdByAgent.has(agent.id));
 	const cwd = cwdGroups(noComms);
 	groups.push(...cwd.groups);
+	for (const group of cwd.groups) {
+		for (const memberId of group.memberAgentIds) {
+			groupIdByAgent.set(memberId, group.groupId);
+		}
+	}
 	for (const [id, role] of cwd.roles) {
 		roleByAgent.set(id, role);
 		parentByAgent.set(id, cwd.parents.get(id) ?? null);
-		const group = cwd.groups.find((candidate) => candidate.memberAgentIds.includes(id));
-		if (group) groupIdByAgent.set(id, group.groupId);
 	}
 	for (const agent of agents) {
 		if (roleByAgent.has(agent.id)) continue;
@@ -475,19 +479,21 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 	const edges = [...edgesById.entries()]
 		.map(([id, edge]) => {
 			const [a, b] = id.split("|") as [string, string];
-			const orderedMessages = [...edge.messages].sort(
-				(x, y) =>
-					x.at - y.at ||
-					(x.messageId ?? x.commId).localeCompare(y.messageId ?? y.commId) ||
-					x.fromAgentId.localeCompare(y.fromAgentId),
-			);
+			const orderedMessages = edge.messages;
 			const latest = orderedMessages[orderedMessages.length - 1]!;
-			const replies = new Set(
-				orderedMessages
-					.filter((message) => message.action === "reply" && message.replyTo !== null)
-					.map((message) => message.replyTo!),
-			);
-			const asks = orderedMessages.filter((message) => message.action === "ask");
+			const replies = new Set<string>();
+			const asks: (typeof orderedMessages)[number][] = [];
+			let aToB = 0;
+			let bToA = 0;
+			for (const message of orderedMessages) {
+				if (message.fromAgentId === a && message.toAgentId === b) aToB++;
+				else if (message.fromAgentId === b && message.toAgentId === a) bToA++;
+				if (message.action === "reply" && message.replyTo !== null) {
+					replies.add(message.replyTo);
+				} else if (message.action === "ask") {
+					asks.push(message);
+				}
+			}
 			const latestSender = agentsById.get(latest.fromAgentId);
 			const latestPreview = latestSender?.redacted ? null : latest.text === null ? null : latest.text.slice(0, 140);
 			return {
@@ -495,8 +501,8 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 				a,
 				b,
 				count: orderedMessages.length,
-				aToB: orderedMessages.filter((message) => message.fromAgentId === a && message.toAgentId === b).length,
-				bToA: orderedMessages.filter((message) => message.fromAgentId === b && message.toAgentId === a).length,
+				aToB,
+				bToA,
 				lastAt: latest.at,
 				lastFrom: latest.fromAgentId,
 				lastAction: latest.action,

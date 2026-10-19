@@ -57,6 +57,7 @@ function toCommViews(comms: CommRow[], c: () => Ctx): CommView[] {
 	if (comms.length === 0) return [];
 	const ctx = c();
 	const snapshot = ctx.mesh.getSnapshot(null);
+	const nodesById = new Map(snapshot.nodes.map((node) => [node.agentId, node]));
 	const agentCache = new Map<string, ReturnType<typeof ctx.repos.agents.get>>();
 	const agent = (agentId: string | null) => {
 		if (agentId === null) return undefined;
@@ -80,8 +81,8 @@ function toCommViews(comms: CommRow[], c: () => Ctx): CommView[] {
 			cwd: comm.direction === "out" ? comm.peer_cwd : null,
 			id: receiverId,
 		};
-		const senderNode = senderId ? snapshot.nodes.find((node) => node.agentId === senderId) : undefined;
-		const receiverNode = receiverId ? snapshot.nodes.find((node) => node.agentId === receiverId) : undefined;
+		const senderNode = senderId ? nodesById.get(senderId) : undefined;
+		const receiverNode = receiverId ? nodesById.get(receiverId) : undefined;
 		return {
 			commKey: comm.comm_id,
 			fromAgentId: senderId,

@@ -246,8 +246,8 @@ export class AgentService {
 		conn.lastSeq = ev.seq;
 
 		if (storedComm) {
-			this.c().mesh.onComm(storedComm);
 			this.c().mesh.invalidate();
+			this.c().mesh.onComm(storedComm);
 		} else if (agentChanged || e.type === "todo_update" || e.type === "subagent_update") {
 			this.c().mesh.invalidate();
 		}
