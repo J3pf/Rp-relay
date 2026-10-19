@@ -15,7 +15,11 @@ type UpgradeServer = Pick<Server, "on" | "off">;
  * (PROTOCOLO §1: "no reconectar").
  */
 export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close(): void } {
-	const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
+	const wss = new WebSocketServer({
+		noServer: true,
+		maxPayload: MAX_FRAME_BYTES,
+		perMessageDeflate: { threshold: 1024 },
+	});
 
 	const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
