@@ -9,6 +9,7 @@ import {
 	connectApp,
 	pairDevice,
 	pairMachine,
+	promptBody,
 	startRelay,
 	type TestRelay,
 } from "./helpers.js";
@@ -493,5 +494,57 @@ describe("HTTP mesh routes", () => {
 		agent2.client.close();
 		app.close();
 		await Promise.all([agent1.client.waitClosed(), agent2.client.waitClosed(), app.waitClosed()]);
+	});
+
+	it("updates prompt agentLabels and comm names dynamically when a new duplicate agent appears", async () => {
+		const device = await pairDevice(t);
+		const machine = await pairMachine(t, "mesh-dyn-pc");
+
+		// 1. Agent 1 connects
+		const agent1 = await connectAgent(t, machine, "dyn-agent-1", {
+			session: { id: "dyn-agent-1", file: null, name: null },
+			cwd: "/workspace/dup-app",
+		});
+
+		// Open prompt for Agent 1
+		const p1 = promptBody(agent1.agentId);
+		agent1.client.send("prompt.open", p1);
+		await expect.poll(() => t.relay.ctx.repos.prompts.get(p1.promptId)?.state).toBe("open");
+
+		// Verify initial prompt label before Agent 2 exists
+		const promptsBefore = await api(t, "GET", "/v1/prompts?state=open", device.deviceToken);
+		expect(promptsBefore.status).toBe(200);
+		const promptItem1Before = promptsBefore.json.prompts.find((p: { promptId: string }) => p.promptId === p1.promptId);
+		expect(promptItem1Before.agentLabel).toBe("dup-app");
+
+		// 2. Agent 2 connects on the same machine with the same cwd
+		const agent2 = await connectAgent(t, machine, "dyn-agent-2", {
+			session: { id: "dyn-agent-2", file: null, name: null },
+			cwd: "/workspace/dup-app",
+		});
+
+		// Open prompt for Agent 2
+		const p2 = promptBody(agent2.agentId);
+		agent2.client.send("prompt.open", p2);
+		await expect.poll(() => t.relay.ctx.repos.prompts.get(p2.promptId)?.state).toBe("open");
+
+		// 3. Verify open prompts list returns disambiguated labels without stale cache
+		const promptsAfter = await api(t, "GET", "/v1/prompts?state=open", device.deviceToken);
+		expect(promptsAfter.status).toBe(200);
+		const promptItem1After = promptsAfter.json.prompts.find((p: { promptId: string }) => p.promptId === p1.promptId);
+		const promptItem2After = promptsAfter.json.prompts.find((p: { promptId: string }) => p.promptId === p2.promptId);
+		expect(promptItem1After.agentLabel).toBe("dup-app");
+		expect(promptItem2After.agentLabel).toBe("dup-app (2)");
+
+		// 4. Verify snapshot node names match
+		const snap = await api(t, "GET", "/v1/mesh", device.deviceToken);
+		const node1 = snap.json.nodes.find((n: { agentId: string }) => n.agentId === agent1.agentId);
+		const node2 = snap.json.nodes.find((n: { agentId: string }) => n.agentId === agent2.agentId);
+		expect(node1.name).toBe("dup-app");
+		expect(node2.name).toBe("dup-app (2)");
+
+		agent1.client.close();
+		agent2.client.close();
+		await Promise.all([agent1.client.waitClosed(), agent2.client.waitClosed()]);
 	});
 });
