@@ -21,8 +21,8 @@ Preparation, audit, verification, and packaging of v0.5.4 release including coll
 - T4 [done] (S3): Review b3bffc4, verify display-name preservation and add test against stale names on duplicate agents.
 - T5 [done] (S5): Bump version to 0.5.4 across package.json, protocol, deploy/install.sh, docs, and lockfile.
 - T6 [done] (S6): English documentation: update CHANGELOG.md and write docs/RELEASE-NOTES-0.5.4.md.
-- T7 [in_progress] (S7): Run quality gate: lint, typecheck, build, npm test 3×, npm outdated, npm audit --omit=dev.
-- T8 [pending] (S8): Report [RELAY 0.5.4 — READY FOR REVIEW] via intercom.
+- T7 [done] (S7): Run quality gate: lint, typecheck, build, npm test 3×, npm outdated, npm audit --omit=dev.
+- T8 [done] (S8): Report [RELAY 0.5.4 — READY FOR REVIEW] via intercom.
 
 ## Log
 
@@ -34,3 +34,5 @@ Preparation, audit, verification, and packaging of v0.5.4 release including coll
 - L6: Commit b3bffc4 audited: verified prompt label batching and set-based topology lookups. Added integration test in test/mesh-http.test.ts ensuring dynamic duplicate updates never return stale cached names.
 - L7: Bumped version to 0.5.4 across package.json, packages/protocol/package.json, deploy/install.sh, README.md, docs/INSTALACION.md, and package-lock.json.
 - L8: Created docs/RELEASE-NOTES-0.5.4.md and updated CHANGELOG.md in English crediting Luis's performance improvements, describing migration 0004, load-test changes, known issues, and upgrade instructions.
+- L9: Quality gate passed 3× in a row on Vitest 5.0.5 (326/326 tests). Hardened CLI test execution by using prebuilt `dist/cli/index.js` when available and setting test timeout to 120s.
+- L10: Analyzed `backup/v052-excluded`: verified it contains no work absent from main (unpushed 0.5.2 revert/bump). Ready for orchestrator review.
