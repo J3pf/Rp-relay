@@ -110,8 +110,10 @@ export class AgentService {
 
 	private resolveUnresolvedComms(): void {
 		const { repos } = this.c();
+		const unresolved = repos.comms.listUnresolved();
+		if (unresolved.length === 0) return;
 		const allAgents = repos.agents.list();
-		for (const comm of repos.comms.listUnresolved()) {
+		for (const comm of unresolved) {
 			let peerAgentId = resolvePeerAgentId(
 				comm.agent_id,
 				comm.machine_id,

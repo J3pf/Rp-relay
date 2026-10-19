@@ -40,7 +40,11 @@ export class MeshService {
 		let snapshot = this.cache.get(machineId)?.snapshot;
 		if (!snapshot) {
 			const { repos } = this.c();
-			const agents = repos.agents.list();
+			const machines = repos.machines.list();
+			const activeMachineIds = new Set(machines.filter((m) => !m.revoked_at).map((m) => m.id));
+			const agents = repos.agents
+				.list()
+				.filter((a) => activeMachineIds.has(a.machine_id) && (machineId === null || a.machine_id === machineId));
 			const latestTodosByAgent: Record<string, TodoTask[]> = Object.create(null);
 			const latestSubagentsByAgent: Record<string, SubagentUpdateEvent[]> = Object.create(null);
 			for (const agent of agents) {
@@ -79,7 +83,7 @@ export class MeshService {
 			}
 			snapshot = buildMeshSnapshot({
 				agents,
-				machines: repos.machines.list(),
+				machines,
 				comms: repos.comms.listSince(now - DAY_MS),
 				now,
 				machineFilter: machineId,
