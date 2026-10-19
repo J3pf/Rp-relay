@@ -81,6 +81,10 @@ export class MessageService {
 			this.pending.delete(k);
 			throw new RelayError("agent_offline", "no se pudo entregar al agente");
 		}
+		const now = Date.now();
+		conn.lastTouchAt = now;
+		repos.agents.touch(m.agentId, now);
+		this.c().publisher.agent(m.agentId);
 		return p;
 	}
 

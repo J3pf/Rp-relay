@@ -57,6 +57,7 @@ export const AgentSnapshot = Type.Object({
 	seq: Type.Integer({ minimum: 0 }),
 	entries: Type.Array(Entry),
 	truncated: Type.Optional(Type.Boolean()),
+	lastActivityAt: OptNullable(Type.Number()),
 });
 export type AgentSnapshot = Static<typeof AgentSnapshot>;
 
