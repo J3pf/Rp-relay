@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -21,6 +20,11 @@ import {
 
 const ROOT = join(import.meta.dirname, "..");
 const TSX = join(ROOT, "node_modules", ".bin", "tsx");
+const DIST_CLI = join(ROOT, "dist/cli/index.js");
+const SRC_CLI = join(ROOT, "src/cli/index.ts");
+// USE_DIST is safe because npm test runs build first, ensuring dist matches current source.
+// We also verify mtime so running vitest directly falls back to tsx if dist is stale.
+const USE_DIST = existsSync(DIST_CLI) && existsSync(SRC_CLI) && statSync(DIST_CLI).mtimeMs >= statSync(SRC_CLI).mtimeMs;
 
 // asíncrono: el relay de la prueba corre en este mismo proceso y no debe quedar bloqueado mientras el CLI le habla
 function cli(
@@ -28,9 +32,11 @@ function cli(
 	env: Record<string, string> = {},
 ): Promise<{ code: number | null; out: string; err: string }> {
 	return new Promise((resolve) => {
+		const bin = USE_DIST ? process.execPath : TSX;
+		const cmdArgs = USE_DIST ? [DIST_CLI, ...args] : [join(ROOT, "src/cli/index.ts"), ...args];
 		execFile(
-			TSX,
-			[join(ROOT, "src/cli/index.ts"), ...args],
+			bin,
+			cmdArgs,
 			{ encoding: "utf8", env: { ...process.env, NO_COLOR: "1", ...env }, timeout: 60_000 },
 			(error, stdout, stderr) => {
 				resolve({ code: error ? ((error as { code?: number }).code ?? 1) : 0, out: stdout, err: stderr });
@@ -39,26 +45,16 @@ function cli(
 	});
 }
 
-const freePort = () =>
-	new Promise<number>((resolve) => {
-		const s = createServer();
-		s.listen(0, "127.0.0.1", () => {
-			const p = (s.address() as any).port;
-			s.close(() => resolve(p));
-		});
-	});
-
 let base: string;
 let cfgFile: string;
 let dataDir: string;
-let port: number;
+const port = 8787;
 let env: Record<string, string>;
 
 beforeAll(async () => {
 	base = mkdtempSync(join(tmpdir(), "rp-cli-"));
 	cfgFile = join(base, "etc", "config.json");
 	dataDir = join(base, "data");
-	port = await freePort();
 	env = { RP_CONFIG: cfgFile };
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
@@ -228,13 +224,19 @@ describe("CLI sin el relay en marcha", () => {
 describe("CLI contra el relay en marcha (API de administración)", { timeout: 120_000 }, () => {
 	let t: TestRelay;
 	const withServer = async (fn: () => Promise<void>) => {
-		t = await startRelay(
-			{ listen: { host: "127.0.0.1", port }, publicUrl: `http://127.0.0.1:${port}` },
-			{ dir: dataDir },
-		);
+		t = await startRelay({ listen: { host: "127.0.0.1", port: 0 } }, { dir: dataDir });
+		const boundPort = new URL(t.http).port;
+		const prevPort = env.RP_LISTEN_PORT;
+		const prevUrl = env.RP_PUBLIC_URL;
+		env.RP_LISTEN_PORT = boundPort;
+		env.RP_PUBLIC_URL = `http://127.0.0.1:${boundPort}`;
 		try {
 			await fn();
 		} finally {
+			if (prevPort !== undefined) env.RP_LISTEN_PORT = prevPort;
+			else delete env.RP_LISTEN_PORT;
+			if (prevUrl !== undefined) env.RP_PUBLIC_URL = prevUrl;
+			else delete env.RP_PUBLIC_URL;
 			await t.stop();
 		}
 	};

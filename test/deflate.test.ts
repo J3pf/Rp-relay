@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { cleanup, pairDevice, pairMachine, sleep, startRelay, type TestRelay } from "./helpers.js";
+import { cleanup, connectAgent, pairDevice, pairMachine, startRelay, type TestRelay } from "./helpers.js";
 
 let t: TestRelay;
 beforeAll(async () => {
@@ -10,6 +10,38 @@ afterAll(async () => {
 	await t.stop();
 	cleanup(t);
 });
+
+function createFrameCollector(ws: WebSocket) {
+	const frames: { rsv1: boolean; length: number }[] = [];
+	const listeners: ((frame: { rsv1: boolean; length: number }) => void)[] = [];
+	const rawStream = (ws as unknown as { _socket: import("node:stream").Duplex })._socket;
+	rawStream.on("data", (chunk: Buffer) => {
+		if (chunk.length === 0) return;
+		const rsv1 = !!(chunk[0]! & 0x40);
+		const f = { rsv1, length: chunk.length };
+		frames.push(f);
+		for (const fn of listeners.splice(0)) fn(f);
+	});
+	return {
+		frames,
+		waitForFrame(
+			predicate: (f: { rsv1: boolean; length: number }) => boolean,
+			timeoutMs = 5000,
+		): Promise<{ rsv1: boolean; length: number }> {
+			const existing = frames.find(predicate);
+			if (existing) return Promise.resolve(existing);
+			return new Promise((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error("timed out waiting for matching frame")), timeoutMs);
+				listeners.push((f) => {
+					if (predicate(f)) {
+						clearTimeout(timer);
+						resolve(f);
+					}
+				});
+			});
+		},
+	};
+}
 
 describe("WebSocket perMessageDeflate compression", () => {
 	it("negotiates with OkHttp client parameters (client_no_context_takeover)", async () => {
@@ -55,15 +87,10 @@ describe("WebSocket perMessageDeflate compression", () => {
 			ws.once("error", reject);
 		});
 
-		const receivedFrames: { rsv1: boolean; length: number }[] = [];
-		const rawStream = (ws as unknown as { _socket: import("node:stream").Duplex })._socket;
-		rawStream.on("data", (chunk: Buffer) => {
-			if (chunk.length === 0) return;
-			const rsv1 = !!(chunk[0]! & 0x40);
-			receivedFrames.push({ rsv1, length: chunk.length });
-		});
+		const collector = createFrameCollector(ws);
 
 		// 1. Send small message (< 1KB), server replies with app.welcome (< 1KB)
+		const welcomePromise = collector.waitForFrame(() => true);
 		ws.send(
 			JSON.stringify({
 				v: 1,
@@ -74,56 +101,18 @@ describe("WebSocket perMessageDeflate compression", () => {
 			}),
 		);
 
-		await sleep(150);
-		expect(receivedFrames.length).toBeGreaterThan(0);
+		const welcomeFrame = await welcomePromise;
 		// App welcome frame is small (< 1KB) -> must be uncompressed (rsv1 === false)
-		expect(receivedFrames[0]!.rsv1).toBe(false);
+		expect(welcomeFrame.rsv1).toBe(false);
 
 		// 2. Pair a machine and an agent that produces a large mesh snapshot (>= 1KB)
 		const m = await pairMachine(t);
-		const agentWs = new WebSocket(`${t.ws}/ws/agent`, {
-			headers: { authorization: `Bearer ${m.machineToken}` },
+		const largeAgent = await connectAgent(t, m, "sess-large-deflate", {
+			session: { id: "sess-large-deflate", file: "/tmp/sess.jsonl", name: `Large Session ${"X".repeat(1200)}` },
 		});
-		await new Promise<void>((resolve, reject) => {
-			agentWs.once("open", () => resolve());
-			agentWs.once("error", reject);
-		});
-
-		// Hello for agent with lots of text / features to exceed 1KB in mesh snapshot
-		agentWs.send(
-			JSON.stringify({
-				v: 1,
-				t: "agent.hello",
-				id: "deflate-agent-hello",
-				ts: Date.now(),
-				d: {
-					agentId: `${m.machineId}:sess-large-deflate`,
-					kind: "pi",
-					instance: "inst-1",
-					epoch: "ep-1",
-					pi: { version: "1.2.0", mode: "tui" },
-					plugin: { version: "0.5.5", features: ["gate", "comms", "topology"] },
-					session: { id: "sess-large-deflate", file: "/tmp/sess.jsonl", name: `Large Session ${"X".repeat(1200)}` },
-					host: { hostname: "devbox", pid: 1, os: "linux" },
-					launcher: "pi",
-					herdr: null,
-					gentle: null,
-					transport: "ws",
-					redacted: false,
-					cwd: "/home/user/large-project",
-					spawnId: null,
-					git: { branch: "main", dirty: false },
-					model: { provider: "anthropic", id: "claude-3-7-sonnet" },
-					thinking: "medium",
-					status: "idle",
-					openPrompts: [],
-				},
-			}),
-		);
-		await sleep(150);
 
 		// Subscribe to mesh on app socket -> server sends mesh.snapshot which is > 1KB
-		receivedFrames.length = 0;
+		const meshFramePromise = collector.waitForFrame((f) => f.rsv1);
 		ws.send(
 			JSON.stringify({
 				v: 1,
@@ -134,14 +123,11 @@ describe("WebSocket perMessageDeflate compression", () => {
 			}),
 		);
 
-		await sleep(200);
-		// Find frame for mesh snapshot (should be compressed)
-		const compressedFrame = receivedFrames.find((f) => f.rsv1);
-		expect(compressedFrame).toBeDefined();
-		expect(compressedFrame!.rsv1).toBe(true);
+		const compressedFrame = await meshFramePromise;
+		expect(compressedFrame.rsv1).toBe(true);
 
 		ws.close();
-		agentWs.close();
+		largeAgent.client.close();
 	});
 
 	it("protects against compression bombs exceeding maxPayload on decompressed size", async () => {
@@ -156,16 +142,18 @@ describe("WebSocket perMessageDeflate compression", () => {
 			ws.once("error", reject);
 		});
 
-		let closedCode = 0;
-		ws.on("close", (code) => {
-			closedCode = code;
+		const closePromise = new Promise<number>((resolve) => {
+			ws.once("close", (code) => resolve(code));
+		});
+		ws.on("error", () => {
+			// Ignore client-side connection reset during server 1009 abort
 		});
 
 		// 2MB of repetitive data compresses to ~2KB, exceeding the 1MB MAX_FRAME_BYTES when decompressed
 		const bomb = Buffer.alloc(2 * 1024 * 1024, "a");
 		ws.send(bomb, { compress: true });
 
-		await sleep(250);
+		const closedCode = await closePromise;
 		// Server closes connection with 1009 (WS_ERR_UNSUPPORTED_MESSAGE_LENGTH / Message too big)
 		expect(closedCode).toBe(1009);
 	});

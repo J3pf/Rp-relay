@@ -14,8 +14,13 @@ describe("spike S3: eco WS con auth Bearer", () => {
 		const msgs: string[] = [];
 		good.on("message", (d) => msgs.push(d.toString()));
 		await new Promise((r) => good.once("open", r));
+		const msgPromise = new Promise<void>((resolve) => {
+			good.on("message", () => {
+				if (msgs.length >= 2) resolve();
+			});
+		});
 		good.send("ping-de-prueba");
-		await new Promise((r) => setTimeout(r, 100));
+		await msgPromise;
 		expect(msgs[0]).toContain("hello");
 		expect(msgs[1]).toBe("ping-de-prueba");
 		good.close();
