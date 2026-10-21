@@ -55,7 +55,7 @@ export class AgentService {
 		conn.instance = h.instance;
 		conn.epoch = h.epoch;
 		conn.lastSeq = epochChanged ? 0 : previousSeq;
-		conn.lastTouchAt = now;
+		conn.lastTouchAt = epochChanged ? now : (row.last_seen_at ?? 0);
 		repos.machines.touch(machine.id, now);
 		hub.registerAgent(conn as AgentConn & { agentId: string });
 		mesh.invalidate();
@@ -117,7 +117,7 @@ export class AgentService {
 		}
 		if (maxAt > 0) {
 			const clampedAt = Math.min(maxAt, Date.now());
-			conn.lastTouchAt = Date.now();
+			conn.lastTouchAt = clampedAt;
 			repos.agents.touch(conn.agentId, clampedAt);
 		}
 		if (latestPreview) {
