@@ -56,7 +56,8 @@ describe("WebSocket perMessageDeflate compression", () => {
 		});
 
 		const receivedFrames: { rsv1: boolean; length: number }[] = [];
-		ws._socket.on("data", (chunk: Buffer) => {
+		const rawStream = (ws as unknown as { _socket: import("node:stream").Duplex })._socket;
+		rawStream.on("data", (chunk: Buffer) => {
 			if (chunk.length === 0) return;
 			const rsv1 = !!(chunk[0]! & 0x40);
 			receivedFrames.push({ rsv1, length: chunk.length });
@@ -102,7 +103,7 @@ describe("WebSocket perMessageDeflate compression", () => {
 					epoch: "ep-1",
 					pi: { version: "1.2.0", mode: "tui" },
 					plugin: { version: "0.5.5", features: ["gate", "comms", "topology"] },
-					session: { id: "sess-large-deflate", file: "/tmp/sess.jsonl", name: "Large Session " + "X".repeat(1200) },
+					session: { id: "sess-large-deflate", file: "/tmp/sess.jsonl", name: `Large Session ${"X".repeat(1200)}` },
 					host: { hostname: "devbox", pid: 1, os: "linux" },
 					launcher: "pi",
 					herdr: null,

@@ -104,7 +104,8 @@ export class AgentService {
 		repos.events.putSnapshot(conn.agentId, s.epoch, s.seq, { entries: s.entries, truncated: s.truncated ?? false });
 		conn.lastSeq = Math.max(conn.lastSeq, s.seq);
 		repos.agents.setSeq(conn.agentId, s.seq);
-		let maxAt = typeof s.lastActivityAt === "number" && Number.isFinite(s.lastActivityAt) ? Math.floor(s.lastActivityAt) : 0;
+		let maxAt =
+			typeof s.lastActivityAt === "number" && Number.isFinite(s.lastActivityAt) ? Math.floor(s.lastActivityAt) : 0;
 		let latestPreview: string | null = null;
 		for (const entry of s.entries) {
 			if (typeof entry.at === "number" && Number.isFinite(entry.at) && entry.at > maxAt) {

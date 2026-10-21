@@ -105,7 +105,8 @@ export class AgentsRepo {
 		stmt(this.db, "UPDATE agents SET online=0, last_seen_at=COALESCE(last_seen_at, ?) WHERE id=?").run(now, id);
 	}
 	setAllOffline(now: number): number {
-		return stmt(this.db, "UPDATE agents SET online=0, last_seen_at=COALESCE(last_seen_at, ?) WHERE online=1").run(now).changes;
+		return stmt(this.db, "UPDATE agents SET online=0, last_seen_at=COALESCE(last_seen_at, ?) WHERE online=1").run(now)
+			.changes;
 	}
 	touch(id: string, now: number): void {
 		stmt(this.db, "UPDATE agents SET last_seen_at=? WHERE id=?").run(now, id);

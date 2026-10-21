@@ -1,12 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-	cleanup,
-	connectAgent,
-	pairMachine,
-	sleep,
-	startRelay,
-	type TestRelay,
-} from "./helpers.js";
+import { cleanup, connectAgent, pairMachine, sleep, startRelay, type TestRelay } from "./helpers.js";
 
 let t: TestRelay;
 beforeAll(async () => {
@@ -59,7 +52,7 @@ describe("Agent presence, last_seen_at preservation, and touch throttling", () =
 
 		// Reconnect with a new epoch (agent rebooted/new session)
 		const nowReboot = Date.now();
-		const agent2 = await connectAgent(t, m, "sess-reconnect-epoch", { epoch: "new-epoch-" + Date.now() });
+		const agent2 = await connectAgent(t, m, "sess-reconnect-epoch", { epoch: `new-epoch-${Date.now()}` });
 		const onlineRow = t.relay.ctx.repos.agents.get(agentId)!;
 		expect(onlineRow.online).toBe(1);
 		expect(onlineRow.last_seen_at).toBeGreaterThanOrEqual(nowReboot);
