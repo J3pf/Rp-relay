@@ -2,7 +2,7 @@
 
 Relay autoalojable (Ubuntu Server) que conecta tus agentes Pi con la app Android RP: lista de agentes en vivo, chat, adjuntos, notificaciones push y **Agent Mesh** (grafo animado en tiempo real de agentes interconectados vía intercom y orchestrator).
 
-> Estado: **v0.5.4 publicado**: relay completo (Fastify + ws + SQLite).
+> Estado: **v0.5.5**: relay completo (Fastify + ws + SQLite).
 > Probado e integrado de extremo a extremo con los repos hermanos [`rp-plugin`](https://github.com/j3pf/rp-plugin) (Pi) y [`rp-app`](https://github.com/j3pf/rp-app) (Android).
 
 | Documento | Contenido |

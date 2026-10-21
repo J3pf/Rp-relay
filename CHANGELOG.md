@@ -5,6 +5,31 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.5.5] - 2026-10-21
+
+### WebSocket Performance & Compression
+- **perMessageDeflate Compression (credit: Luis Chacón):** Enabled RFC 7692 `perMessageDeflate` on WebSocket endpoints to compress communication frames, reducing network egress and latency on mobile connections.
+- **Deflate Threshold Enforcement & Context Takeover:** Negotiate `serverNoContextTakeover: true` and `clientNoContextTakeover: true` so `ws` strictly enforces the 1KB threshold. Messages under 1024 bytes (ACKs, event deltas, heartbeat pings) bypass zlib to avoid CPU churn and contention on the zlib limiter, while frames >= 1KB (mesh snapshots, message history) are compressed. Zlib contexts are freed between frames to prevent memory leaks.
+- **Decompressed Size Bomb Guard:** Verified and pinned that `maxPayload: MAX_FRAME_BYTES` (1MB) is enforced on decompressed payloads, closing connections that exceed 1MB decompressed with close code 1009.
+
+### Agent Presence & Activity Throttling
+- **Preserve last_seen_at on Reconnect (credit: Luis Chacón):** Transient transport reconnects with matching epochs preserve the database `last_seen_at` timestamp. Prevents idle agents from falsely resetting to "activo ahora" in the Android app.
+- **Snapshot lastActivityAt (credit: Luis Chacón):** Supports `lastActivityAt` in `AgentSnapshot` and historical `entry.at` timestamps, initializing `last_seen_at` to the agent's real last activity when connecting with an existing chat history.
+- **Touch Throttling to Real Activity (credit: Luis Chacón):** Throttles `last_seen_at` database updates to at most once every 15 seconds during streaming, restricted to real activity events (`message_start`, `message_delta`, `message_end`, `user_message`, `tool_execution_start`, `tool_execution_end`, `agent_start`, `comm`). Non-activity events do not trigger database updates.
+- **Touch Resumption Fix:** Synchronized `conn.lastTouchAt` with the actual database timestamp on reconnect and snapshot ingestion, ensuring immediate activity events in the first 15 seconds after reconnect are not erroneously throttled away.
+
+### Protocol Compatibility
+- **Rp-plugin & Rp-app Interoperability:** Compatible with `Rp-plugin` v0.5.5 non-pi bridged launchers (`claude`, `codex`, `agy`) and `Rp-app` v0.5.5 dynamic slash catalogs and OkHttp WebSocket compression.
+
+### Known Issues & Security
+- **Node-Forge Vulnerability:** `npm audit` reports GHSA-86w9-cpqp-85rv (high) in `node-forge` via optional dependency `acme-client` 5.4.0 (both packages are at their latest stable releases; no upstream patch exists yet in node-forge). Only relevant when ACME automatic TLS certificate provisioning is enabled.
+
+### Upgrade
+- Upgrade existing installations via:
+  ```bash
+  sudo npm i -g https://github.com/J3pf/Rp-relay/releases/download/v0.5.5/j3pf-rp-relay-0.5.5.tgz && sudo systemctl restart rp-relay
+  ```
+
 ## [0.5.4] - 2026-10-19
 
 ### Performance & Database
