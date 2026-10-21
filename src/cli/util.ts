@@ -47,6 +47,7 @@ export async function adminCall<T = unknown>(
 	method: "GET" | "POST",
 	path: string,
 	body?: unknown,
+	timeoutMs?: number,
 ): Promise<{ status: number; data: T } | null> {
 	let token: string;
 	try {
@@ -56,6 +57,9 @@ export async function adminCall<T = unknown>(
 	}
 	const { proto, host, port } = localBase(config);
 	const payload = body === undefined ? undefined : JSON.stringify(body);
+	const envTimeout = process.env.RP_ADMIN_TIMEOUT_MS ? Number(process.env.RP_ADMIN_TIMEOUT_MS) : undefined;
+	const timeout = timeoutMs ?? (Number.isFinite(envTimeout) && envTimeout! > 0 ? envTimeout! : 15_000);
+
 	return new Promise((resolve, reject) => {
 		const req = (proto === "https" ? httpsRequest : httpRequest)(
 			{
@@ -63,7 +67,7 @@ export async function adminCall<T = unknown>(
 				port,
 				path,
 				method,
-				timeout: 15_000,
+				timeout,
 				headers: {
 					authorization: `Bearer ${token}`,
 					...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
@@ -85,10 +89,10 @@ export async function adminCall<T = unknown>(
 				});
 			},
 		);
-		req.on("error", (e: NodeJS.ErrnoException) =>
-			e.code === "ECONNREFUSED" || e.code === "ECONNRESET" ? resolve(null) : reject(e),
-		);
-		req.on("timeout", () => req.destroy(new Error("tiempo de espera agotado")));
+		req.on("error", (e: NodeJS.ErrnoException) => (e.code === "ECONNREFUSED" ? resolve(null) : reject(e)));
+		req.on("timeout", () => {
+			req.destroy(new Error("tiempo de espera agotado"));
+		});
 		if (payload) req.write(payload);
 		req.end();
 	});
