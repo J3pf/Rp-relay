@@ -18,7 +18,11 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 	const wss = new WebSocketServer({
 		noServer: true,
 		maxPayload: MAX_FRAME_BYTES,
-		perMessageDeflate: { threshold: 1024 },
+		perMessageDeflate: {
+			threshold: 1024,
+			serverNoContextTakeover: true,
+			clientNoContextTakeover: true,
+		},
 	});
 
 	const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
