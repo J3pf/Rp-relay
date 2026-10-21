@@ -67,8 +67,9 @@ export class HostService {
 	}
 
 	onHostClose(conn: HostConn): void {
-		const { hub, publisher } = this.c();
+		const { hub, publisher, repos } = this.c();
 		if (!hub.unregisterHost(conn)) return;
+		if (!repos.db.open) return;
 		for (const [id, p] of this.pending) {
 			if (p.machineId !== conn.machineId) continue;
 			clearTimeout(p.timer);

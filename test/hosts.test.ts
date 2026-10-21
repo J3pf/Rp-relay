@@ -371,4 +371,25 @@ describe("rp-host (/ws/host)", () => {
 		hostReconnect.close();
 		app.close();
 	});
+
+	it("no lanza excepción al llamar onHostClose si la base de datos ya fue cerrada", async () => {
+		const dev = await pairDevice(t);
+		const m = await pairMachine(t);
+		const { client: app } = await connectApp(t, dev);
+		const host = await connectHost(m);
+		await app.next("hosts.update");
+		const conn = t.relay.ctx.hub.hosts.get(m.machineId)!;
+		expect(conn).toBeDefined();
+
+		// Simula cierre de la base de datos durante el apagado del relay
+		t.relay.ctx.repos.db.close();
+
+		// Sin el guard repos.db.open, onHostClose lanza TypeError: The database connection is not open
+		expect(() => {
+			t.relay.ctx.hosts.onHostClose(conn);
+		}).not.toThrow();
+
+		app.close();
+		host.close();
+	});
 });
