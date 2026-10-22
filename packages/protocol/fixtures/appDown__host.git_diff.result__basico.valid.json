@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "t": "host.git_diff.result",
+  "ts": 1760342400000,
+  "d": {
+    "branch": "main",
+    "files": [
+      {
+        "path": "file.txt",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 0,
+        "patch": "@@ -1 +1,2 @@\n+line\n"
+      }
+    ],
+    "totalAdditions": 1,
+    "totalDeletions": 0
+  }
+}

@@ -216,6 +216,8 @@ export class AppSession {
 			case "host.herdr_layout":
 			case "host.spawn":
 			case "host.kill":
+			case "host.git_diff":
+			case "host.git_discard":
 				hosts.forward(this.conn, env);
 				return;
 		}

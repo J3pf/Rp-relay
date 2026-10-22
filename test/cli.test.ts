@@ -48,7 +48,7 @@ function cli(
 let base: string;
 let cfgFile: string;
 let dataDir: string;
-const port = 8787;
+const port = 8991;
 let env: Record<string, string>;
 
 beforeAll(async () => {

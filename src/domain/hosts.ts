@@ -31,6 +31,8 @@ const HOST_FORWARD: Record<string, number> = {
 	"host.herdr_layout": 1,
 	"host.spawn": 2,
 	"host.kill": 1,
+	"host.git_diff": 1,
+	"host.git_discard": 1,
 };
 
 /** `rp-host` (PROTOCOLO §9): enrutamiento `host.*` app ⇄ host e `initialPrompt` retenido 60 s. */
