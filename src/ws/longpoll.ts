@@ -1,4 +1,4 @@
-import type { Envelope } from "@j3pf/rp-protocol";
+import { CloseCode, type Envelope } from "@j3pf/rp-protocol";
 import type { AgentConn } from "./conn.js";
 
 /** Adaptador long-poll: implementa `AgentConn` con una cola que `poll` vacía (PROTOCOLO §7). */
@@ -10,17 +10,28 @@ export class LongPollConn implements AgentConn {
 	lastSeq = 0;
 	lastTouchAt = 0;
 	lastActivity = Date.now();
+	lastPollAt = Date.now();
 	closed: { code: number; reason: string } | null = null;
 	private queue: Envelope[] = [];
 	private bytes = 0;
 	private waiter: (() => void) | null = null;
 
-	constructor(readonly machineId: string) {}
+	constructor(
+		readonly machineId: string,
+		private readonly hardBufferedBytes = Number.POSITIVE_INFINITY,
+	) {}
 
 	send(env: Envelope): boolean {
 		if (this.closed) return false;
+		const encodedBytes = JSON.stringify(env).length;
+		if (this.bytes + encodedBytes > this.hardBufferedBytes) {
+			this.queue = [];
+			this.bytes = 0;
+			this.close(CloseCode.TryAgainLater, "slow consumer");
+			return false;
+		}
 		this.queue.push(env);
-		this.bytes += JSON.stringify(env).length;
+		this.bytes += encodedBytes;
 		this.wake();
 		return true;
 	}
@@ -46,21 +57,29 @@ export class LongPollConn implements AgentConn {
 		timeoutMs: number,
 		signal?: AbortSignal,
 	): Promise<{ messages: Envelope[] } | { closed: { code: number; reason: string } }> {
-		this.touch();
+		const now = Date.now();
+		this.lastActivity = now;
+		this.lastPollAt = now;
+		if (signal?.aborted) return { messages: [] };
 		if (this.queue.length === 0 && !this.closed) {
+			this.wake();
 			await new Promise<void>((resolve) => {
-				const timer = setTimeout(resolve, timeoutMs);
+				let timer: NodeJS.Timeout | undefined;
 				const done = () => {
-					clearTimeout(timer);
+					if (timer) clearTimeout(timer);
 					signal?.removeEventListener("abort", done);
 					resolve();
 				};
+				timer = setTimeout(done, timeoutMs);
 				this.waiter = done;
 				signal?.addEventListener("abort", done, { once: true });
 			});
 			this.waiter = null;
 		}
-		this.touch();
+		if (signal?.aborted) return { messages: [] };
+		const after = Date.now();
+		this.lastActivity = after;
+		this.lastPollAt = after;
 		if (this.queue.length > 0) {
 			const messages = this.queue;
 			this.queue = [];

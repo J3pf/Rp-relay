@@ -17,7 +17,7 @@ import {
 import type { WebSocket } from "ws";
 import type { Ctx } from "../context.js";
 import type { MachineRow } from "../db/repos/index.js";
-import { type AgentConn, startHeartbeat, WsConn } from "./conn.js";
+import { type AgentConn, bindWsGateway, startHeartbeat, WsConn } from "./conn.js";
 import { LongPollConn } from "./longpoll.js";
 
 /** Máquina de estados del protocolo plugin → relay; la comparten el transporte WS y el long-poll. */
@@ -33,8 +33,9 @@ export class AgentSession {
 		return this.helloDone;
 	}
 
-	/** Procesa un sobre ya parseado. Devuelve false si la sesión debe cerrarse. */
-	handle(env: Envelope): void {
+	/** Procesa un sobre ya parseado. Devuelve false si la sesión ya estaba cerrada. */
+	handle(env: Envelope): boolean {
+		if (this.conn.closed) return false;
 		const { log } = this.c();
 		if (env.v < MIN_PROTOCOL_VERSION || env.v > PROTOCOL_VERSION) {
 			this.conn.send(
@@ -45,18 +46,21 @@ export class AgentSession {
 				),
 			);
 			this.conn.close(CloseCode.IncompatibleVersion, "incompatible protocol version");
-			return;
+			return false;
 		}
 		if (!this.helloDone && env.t !== "agent.hello") {
 			this.conn.send(errorEnvelope(ErrorCode.BadRequest, "el primer mensaje debe ser agent.hello", env.id));
 			this.conn.close(CloseCode.InvalidFrame, "hello required");
-			return;
+			return false;
 		}
 		const v = validateMessage("up", env);
 		if (!v.ok) {
 			this.conn.send(errorEnvelope(ErrorCode.BadRequest, v.message, env.id));
-			if (env.t === "agent.hello") this.conn.close(CloseCode.InvalidFrame, "invalid hello");
-			return;
+			if (env.t === "agent.hello") {
+				this.conn.close(CloseCode.InvalidFrame, "invalid hello");
+				return false;
+			}
+			return true;
 		}
 		if (log.isLevelEnabled("trace")) log.trace({ agentId: this.conn.agentId, t: env.t, d: env.d }, "plugin → relay");
 		else if (log.isLevelEnabled("debug")) {
@@ -74,6 +78,7 @@ export class AgentSession {
 			);
 			this.conn.send(errorEnvelope(ErrorCode.Internal, "error interno", env.id));
 		}
+		return !this.conn.closed;
 	}
 
 	private dispatch(env: Envelope): void {
@@ -145,32 +150,19 @@ export function handleAgentSocket(c: () => Ctx, socket: WebSocket, machine: Mach
 	const session = new AgentSession(c, conn, machine);
 	const { log } = c();
 	startHeartbeat(socket);
-	const helloTimer = setTimeout(() => {
-		if (!session.ready) conn.close(CloseCode.InvalidFrame, "hello timeout");
-	}, c().config.limits.helloTimeoutMs);
-	helloTimer.unref();
-
-	socket.on("message", (data, isBinary) => {
-		if (isBinary) {
-			conn.send(errorEnvelope(ErrorCode.BadRequest, "sólo se admiten frames de texto"));
-			conn.close(CloseCode.InvalidFrame, "binary frame");
-			return;
-		}
-		const parsed = parseFrame(data as Buffer);
-		if (!parsed.ok) {
-			conn.send(
-				errorEnvelope(parsed.reason === "too_large" ? ErrorCode.TooLarge : ErrorCode.BadRequest, parsed.message),
-			);
-			conn.close(CloseCode.InvalidFrame, parsed.reason);
-			return;
-		}
-		session.handle(parsed.env);
+	bindWsGateway({
+		socket,
+		conn,
+		helloTimeoutMs: c().config.limits.helloTimeoutMs,
+		isReady: () => session.ready,
+		onEnvelope: (env) => {
+			session.handle(env);
+		},
+		onClose: () => {
+			session.onClose();
+		},
+		onError: (e) => log.debug({ err: e.message }, "error de socket de agente"),
 	});
-	socket.on("close", () => {
-		clearTimeout(helloTimer);
-		session.onClose();
-	});
-	socket.on("error", (e) => log.debug({ err: e.message }, "error de socket de agente"));
 }
 
 /** Sesiones long-poll (transporte de respaldo): una por `agentId`, con expiración por inactividad. */
@@ -206,11 +198,13 @@ export class LongPollRegistry {
 					rejected++;
 					continue;
 				}
-				const conn = new LongPollConn(machine.id);
+				const conn = new LongPollConn(machine.id, this.c().config.limits.hardBufferedBytes);
 				const session = new AgentSession(this.c, conn, machine);
 				const next = { session, conn };
 				session.handle(env);
 				if (session.ready) {
+					const prev = this.sessions.get(agentId);
+					if (prev && prev !== next) prev.conn.close(CloseCode.Replaced, "replaced by newer connection");
 					current = next;
 					this.sessions.set(agentId, next);
 					accepted++;
@@ -220,14 +214,17 @@ export class LongPollRegistry {
 				}
 				continue;
 			}
+			if (current && (current.conn.closed || this.c().hub.agents.get(current.conn.agentId ?? "") !== current.conn)) {
+				current = undefined;
+			}
 			const target = current ?? this.byAgentHint(machine.id, env);
 			if (!target) {
 				rejected++;
 				continue;
 			}
 			target.conn.touch();
-			target.session.handle(env);
-			accepted++;
+			if (target.session.handle(env)) accepted++;
+			else rejected++;
 		}
 		return { accepted, rejected };
 	}
@@ -246,7 +243,15 @@ export class LongPollRegistry {
 					: typeof raw.data?.agentId === "string"
 						? raw.data.agentId
 						: null;
-		const mine = [...this.sessions.values()].filter((s) => s.conn.machineId === machineId && s.session.ready);
+		const { hub } = this.c();
+		const mine = [...this.sessions.values()].filter(
+			(s) =>
+				!s.conn.closed &&
+				s.conn.machineId === machineId &&
+				s.session.ready &&
+				s.conn.agentId !== null &&
+				hub.agents.get(s.conn.agentId) === s.conn,
+		);
 		if (hint) return mine.find((s) => s.conn.agentId === hint);
 		return mine.length === 1 ? mine[0] : undefined;
 	}
@@ -264,7 +269,7 @@ export class LongPollRegistry {
 	private sweep(): void {
 		const now = Date.now();
 		for (const [id, e] of this.sessions) {
-			if (e.conn.closed || now - e.conn.lastActivity > this.idleMs) {
+			if (e.conn.closed || now - e.conn.lastActivity > this.idleMs || now - e.conn.lastPollAt > this.idleMs * 2) {
 				e.conn.close(CloseCode.Normal, "idle");
 				this.drop(id, e);
 			}

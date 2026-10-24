@@ -25,6 +25,25 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 		},
 	});
 
+	const failedUpgrades = new Map<string, { count: number; resetAt: number }>();
+	const MAX_FAILED_UPGRADES_PER_MIN = 30;
+	const checkFailedUpgradeRate = (ip: string): boolean => {
+		const now = Date.now();
+		if (failedUpgrades.size > 1_000) {
+			for (const [k, v] of failedUpgrades) {
+				if (v.resetAt <= now) failedUpgrades.delete(k);
+			}
+			if (failedUpgrades.size > 1_000) failedUpgrades.clear();
+		}
+		const entry = failedUpgrades.get(ip);
+		if (!entry || entry.resetAt <= now) {
+			failedUpgrades.set(ip, { count: 1, resetAt: now + 60_000 });
+			return true;
+		}
+		entry.count += 1;
+		return entry.count <= MAX_FAILED_UPGRADES_PER_MIN;
+	};
+
 	const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
 		const ctx = c();
@@ -32,10 +51,16 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 			socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
 			socket.destroy();
 		};
+		const remoteIp = req.socket.remoteAddress ?? "unknown";
 		switch (url.pathname) {
 			case "/ws/agent": {
 				const auth = ctx.auth.machine(req.headers);
+				if (!auth.ok && !checkFailedUpgradeRate(remoteIp)) {
+					reject("429 Too Many Requests");
+					return;
+				}
 				wss.handleUpgrade(req, socket, head, (ws) => {
+					ws.on("error", () => {});
 					if (!auth.ok) return void ws.close(CloseCode.Unauthorized, `unauthorized: ${auth.reason}`);
 					handleAgentSocket(c, ws, auth.row);
 				});
@@ -43,7 +68,12 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 			}
 			case "/ws/host": {
 				const auth = ctx.auth.machine(req.headers);
+				if (!auth.ok && !checkFailedUpgradeRate(remoteIp)) {
+					reject("429 Too Many Requests");
+					return;
+				}
 				wss.handleUpgrade(req, socket, head, (ws) => {
+					ws.on("error", () => {});
 					if (!auth.ok) return void ws.close(CloseCode.Unauthorized, `unauthorized: ${auth.reason}`);
 					handleHostSocket(c, ws, auth.row);
 				});
@@ -51,8 +81,13 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 			}
 			case "/ws/app": {
 				const auth = ctx.auth.device(req.headers);
+				if (!auth.ok && !checkFailedUpgradeRate(remoteIp)) {
+					reject("429 Too Many Requests");
+					return;
+				}
 				const mode = url.searchParams.get("mode") === "direct" ? "direct" : "foreground";
 				wss.handleUpgrade(req, socket, head, (ws) => {
+					ws.on("error", () => {});
 					if (!auth.ok) return void ws.close(CloseCode.Unauthorized, `unauthorized: ${auth.reason}`);
 					handleAppSocket(c, ws, auth.row, mode);
 				});

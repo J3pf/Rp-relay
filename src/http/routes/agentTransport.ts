@@ -37,7 +37,9 @@ export function registerAgentTransport(
 			return reply.code(410).send({ error: { code: "conflict", message: "sesión reemplazada" }, closeCode: 4003 });
 		}
 		const ac = new AbortController();
-		req.raw.on("close", () => ac.abort());
+		req.raw.on("close", () => {
+			if (!reply.sent && req.raw.destroyed) ac.abort();
+		});
 		const r = await entry.conn.poll(p.timeout ?? POLL_MS, ac.signal);
 		if ("closed" in r) {
 			registry.drop(p.agentId, entry);

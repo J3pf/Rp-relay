@@ -1,21 +1,29 @@
 import {
+	type AgentRef,
+	type AgentSubscribe,
 	type Answer,
+	type AppHello,
+	type AppPromptAnswer,
+	type AppUserMessage,
 	CloseCode,
 	type Envelope,
 	ErrorCode,
 	envelope,
 	errorEnvelope,
+	type HostSummary,
+	type MeshSubscribe,
 	MIN_PROTOCOL_VERSION,
 	PROTOCOL_VERSION,
-	parseFrame,
+	type PushAck,
 	validateMessage,
 } from "@j3pf/rp-protocol";
+import type { Static } from "@sinclair/typebox";
 import { ulid } from "ulid";
 import type { WebSocket } from "ws";
 import type { Ctx } from "../context.js";
 import type { DeviceRow } from "../db/repos/index.js";
 import { RelayError } from "../util/errors.js";
-import { type AppConn, startHeartbeat, WsConn } from "./conn.js";
+import { type AppConn, bindWsGateway, startHeartbeat, WsConn } from "./conn.js";
 
 const TOUCH_EVERY_MS = 5 * 60_000;
 
@@ -96,9 +104,9 @@ export class AppSession {
 	private dispatch(env: Envelope): void {
 		const ctx = this.c();
 		const { repos, hub, summaries, history, messages, prompts, dispatcher, hosts, agents, config } = ctx;
-		const d = (env.d ?? {}) as any;
 		switch (env.t) {
 			case "app.hello": {
+				const d = env.d as Static<typeof AppHello>;
 				if (d.deviceId !== this.device.id) {
 					this.conn.send(errorEnvelope(ErrorCode.Unauthorized, "deviceId no coincide con el token", env.id));
 					this.conn.close(CloseCode.Unauthorized, "device mismatch");
@@ -119,14 +127,14 @@ export class AppSession {
 				if (this.conn.mode === "direct") {
 					dispatcher.flushDirect(this.device.id, (m) => this.conn.send(m));
 				} else {
-					const hostUpdates = repos.machines
+					const hostUpdates: HostSummary[] = repos.machines
 						.list()
 						.filter((m) => m.host_info || hub.hosts.has(m.id))
 						.map((m) => {
-							let info: any = {};
+							let info: Partial<HostSummary> = {};
 							if (m.host_info) {
 								try {
-									info = JSON.parse(m.host_info);
+									info = JSON.parse(m.host_info) as Partial<HostSummary>;
 								} catch {
 									info = {};
 								}
@@ -149,6 +157,7 @@ export class AppSession {
 				return;
 			}
 			case "agent.subscribe": {
+				const d = env.d as Static<typeof AgentSubscribe>;
 				if (this.conn.mode === "direct")
 					throw new RelayError("bad_request", "el canal directo no admite suscripciones");
 				const a = repos.agents.get(d.agentId);
@@ -161,11 +170,14 @@ export class AppSession {
 				if (needsResync) hub.agents.get(d.agentId)?.send(envelope("agent.resync", {}));
 				return;
 			}
-			case "agent.unsubscribe":
+			case "agent.unsubscribe": {
+				const d = env.d as Static<typeof AgentRef>;
 				hub.unsubscribe(this.conn, d.agentId);
 				if (env.id) this.reply(env, "ack");
 				return;
+			}
 			case "mesh.subscribe": {
+				const d = env.d as Static<typeof MeshSubscribe>;
 				if (this.conn.mode === "direct")
 					throw new RelayError("bad_request", "el canal directo no admite suscripciones");
 				const snapshot = ctx.mesh.subscribe(this.conn, d.machineId ?? null);
@@ -177,6 +189,7 @@ export class AppSession {
 				if (env.id) this.reply(env, "ack");
 				return;
 			case "user.message": {
+				const d = env.d as Static<typeof AppUserMessage>;
 				const { agentId, ...rest } = d;
 				messages
 					.send(this.device.id, { agentId, ...rest })
@@ -187,11 +200,14 @@ export class AppSession {
 					});
 				return;
 			}
-			case "agent.abort":
+			case "agent.abort": {
+				const d = env.d as Static<typeof AgentRef>;
 				messages.abort(d.agentId);
 				this.reply(env, "ack");
 				return;
+			}
 			case "prompt.answer": {
+				const d = env.d as Static<typeof AppPromptAnswer>;
 				const r = prompts.answer(d.promptId, d.answer as Answer, this.device.id, { conn: this.conn, reqId: env.id });
 				if (r.ok)
 					this.reply(
@@ -203,15 +219,18 @@ export class AppSession {
 				return;
 			}
 			case "agent.forget": {
+				const d = env.d as Static<typeof AgentRef>;
 				const a = repos.agents.get(d.agentId);
 				if (!a) throw new RelayError("not_found", "agente desconocido");
 				if (!agents.forget(d.agentId)) throw new RelayError("conflict", "no se puede olvidar un agente conectado");
 				this.reply(env, "ack");
 				return;
 			}
-			case "push.ack":
+			case "push.ack": {
+				const d = env.d as Static<typeof PushAck>;
 				dispatcher.ackDirect(this.device.id, d.pushId);
 				return;
+			}
 			case "host.list_dirs":
 			case "host.herdr_layout":
 			case "host.spawn":
@@ -241,30 +260,16 @@ export function handleAppSocket(
 	hub.addApp(conn);
 	log.info({ deviceId: device.id, mode, connId: conn.id }, "app conectada");
 	startHeartbeat(socket, { onPong: () => session.touch() });
-	const helloTimer = setTimeout(() => {
-		if (!session.ready) conn.close(CloseCode.InvalidFrame, "hello timeout");
-	}, c().config.limits.helloTimeoutMs);
-	helloTimer.unref();
-
-	socket.on("message", (data, isBinary) => {
-		if (isBinary) {
-			conn.close(CloseCode.InvalidFrame, "binary frame");
-			return;
-		}
-		const parsed = parseFrame(data as Buffer);
-		if (!parsed.ok) {
-			conn.send(
-				errorEnvelope(parsed.reason === "too_large" ? ErrorCode.TooLarge : ErrorCode.BadRequest, parsed.message),
-			);
-			conn.close(CloseCode.InvalidFrame, parsed.reason);
-			return;
-		}
-		session.handle(parsed.env);
+	bindWsGateway({
+		socket,
+		conn,
+		helloTimeoutMs: c().config.limits.helloTimeoutMs,
+		isReady: () => session.ready,
+		onEnvelope: (env) => session.handle(env),
+		onClose: (code) => {
+			session.onClose();
+			log.info({ deviceId: device.id, mode, connId: conn.id, code }, "app desconectada");
+		},
+		onError: (e) => log.debug({ err: e.message }, "error de socket de app"),
 	});
-	socket.on("close", (code) => {
-		clearTimeout(helloTimer);
-		session.onClose();
-		log.info({ deviceId: device.id, mode, connId: conn.id, code }, "app desconectada");
-	});
-	socket.on("error", (e) => log.debug({ err: e.message }, "error de socket de app"));
 }

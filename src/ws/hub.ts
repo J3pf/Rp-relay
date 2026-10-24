@@ -154,10 +154,17 @@ export class Hub {
 			this.unregisterAgent(c);
 			c.close(code, reason);
 		}
-		this.hosts.get(machineId)?.close(code, reason);
+		const host = this.hosts.get(machineId);
+		if (host) {
+			this.unregisterHost(host);
+			host.close(code, reason);
+		}
 	}
 	closeDevice(deviceId: string, code: number, reason: string): void {
-		for (const c of this.appsOfDevice(deviceId)) c.close(code, reason);
+		for (const c of this.appsOfDevice(deviceId)) {
+			this.removeApp(c);
+			c.close(code, reason);
+		}
 	}
 
 	/** Cierra todas las conexiones (cierre ordenado: 1012 = service restart). */

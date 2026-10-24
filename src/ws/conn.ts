@@ -1,5 +1,12 @@
-import type { Envelope } from "@j3pf/rp-protocol";
-import { PING_INTERVAL_MS, PONG_TIMEOUT_MS } from "@j3pf/rp-protocol";
+import {
+	CloseCode,
+	type Envelope,
+	ErrorCode,
+	errorEnvelope,
+	PING_INTERVAL_MS,
+	PONG_TIMEOUT_MS,
+	parseFrame,
+} from "@j3pf/rp-protocol";
 import { WebSocket } from "ws";
 
 /** Conexión abstracta: WebSocket real o adaptador long-poll. */
@@ -7,6 +14,7 @@ export interface Conn {
 	send(env: Envelope): boolean;
 	close(code: number, reason?: string): void;
 	readonly bufferedAmount: number;
+	readonly closed?: boolean | { code: number; reason: string } | null;
 }
 
 export interface AgentConn extends Conn {
@@ -35,9 +43,10 @@ export interface HostConn extends Conn {
 }
 
 export class WsConn implements Conn {
+	closed = false;
 	constructor(readonly socket: WebSocket) {}
 	send(env: Envelope): boolean {
-		if (this.socket.readyState !== WebSocket.OPEN) return false;
+		if (this.closed || this.socket.readyState !== WebSocket.OPEN) return false;
 		try {
 			this.socket.send(JSON.stringify(env));
 			return true;
@@ -49,6 +58,7 @@ export class WsConn implements Conn {
 		return this.socket.bufferedAmount;
 	}
 	close(code: number, reason?: string): void {
+		this.closed = true;
 		try {
 			if (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
 				this.socket.close(code, reason?.slice(0, 120));
@@ -56,6 +66,45 @@ export class WsConn implements Conn {
 			this.socket.terminate();
 		}
 	}
+}
+
+export function bindWsGateway(opts: {
+	socket: WebSocket;
+	conn: WsConn;
+	helloTimeoutMs: number;
+	isReady: () => boolean;
+	onEnvelope: (env: Envelope) => void;
+	onClose: (code: number) => void;
+	onError: (err: Error) => void;
+}): void {
+	const helloTimer = setTimeout(() => {
+		if (!opts.isReady()) opts.conn.close(CloseCode.InvalidFrame, "hello timeout");
+	}, opts.helloTimeoutMs);
+	helloTimer.unref();
+
+	opts.socket.on("message", (data, isBinary) => {
+		if (opts.conn.closed) return;
+		if (isBinary) {
+			opts.conn.send(errorEnvelope(ErrorCode.BadRequest, "sólo se admiten frames de texto"));
+			opts.conn.close(CloseCode.InvalidFrame, "binary frame");
+			return;
+		}
+		const parsed = parseFrame(data as Buffer);
+		if (!parsed.ok) {
+			opts.conn.send(
+				errorEnvelope(parsed.reason === "too_large" ? ErrorCode.TooLarge : ErrorCode.BadRequest, parsed.message),
+			);
+			opts.conn.close(CloseCode.InvalidFrame, parsed.reason);
+			return;
+		}
+		opts.onEnvelope(parsed.env);
+	});
+	opts.socket.on("close", (code) => {
+		opts.conn.closed = true;
+		clearTimeout(helloTimer);
+		opts.onClose(code);
+	});
+	opts.socket.on("error", opts.onError);
 }
 
 /** Ping WS cada 25 s; si no hay pong en 10 s se termina la conexión (PROTOCOLO §1). */

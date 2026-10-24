@@ -193,4 +193,28 @@ describe("transporte long-poll (plugin tras proxy corporativo)", () => {
 		expect(list.find((a) => a.agentId === h1.agentId)?.status).toBe("working");
 		expect(list.find((a) => a.agentId === h2.agentId)?.status).toBe("error");
 	});
+
+	it("poll abortado no pierde mensajes en cola y sesión cerrada rechaza envíos posteriores", async () => {
+		const m = await pairMachine(t);
+		const hello = helloBody(m.machineId, "lp-abort", { transport: "longpoll" });
+		await send(m, [env("agent.hello", hello)]);
+		const lp = (t.relay as any).longPoll;
+		const entry = lp.get(hello.agentId);
+		expect(entry).toBeTruthy();
+
+		const ac = new AbortController();
+		ac.abort();
+		const aborted = await entry.conn.poll(500, ac.signal);
+		expect(aborted).toEqual({ messages: [] });
+
+		// El welcome sigue intacto para el siguiente poll real
+		const nextPoll = await poll(m, hello.agentId, hello.instance, 200);
+		expect(nextPoll.status).toBe(200);
+		expect(nextPoll.json.messages[0]).toMatchObject({ t: "agent.welcome" });
+
+		// Cerrar la conexión impide que byAgentHint acepte más mensajes de la sesión cerrada
+		entry.conn.close(4001, "revoked");
+		const afterClose = await send(m, [env("agent.status", { status: "working" })]);
+		expect(afterClose.json).toEqual({ ok: true, accepted: 0, rejected: 1 });
+	});
 });
