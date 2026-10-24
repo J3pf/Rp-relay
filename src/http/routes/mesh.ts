@@ -11,6 +11,7 @@ import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
 import type { CommRow } from "../../db/repos/comms.js";
 import { agentDisplayName } from "../../domain/agentNames.js";
+import { deduplicateCommRows } from "../../domain/mesh/topology.js";
 import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
 
@@ -19,38 +20,6 @@ const DEFAULT_LIMIT = 50;
 
 function clampedLimit(limit: number | undefined): number {
 	return Math.max(1, Math.min(MAX_LIMIT, limit ?? DEFAULT_LIMIT));
-}
-
-function deduplicate(comms: CommRow[]): CommRow[] {
-	const byMessageId = new Map<string, CommRow[]>();
-	const unique: CommRow[] = [];
-	for (const comm of comms) {
-		if (comm.message_id === null) {
-			unique.push(comm);
-			continue;
-		}
-		const rows = byMessageId.get(comm.message_id) ?? [];
-		rows.push(comm);
-		byMessageId.set(comm.message_id, rows);
-	}
-	for (const rows of byMessageId.values()) {
-		const primary = rows.find((row) => row.direction === "out") ?? rows[0]!;
-		const peerAgentId =
-			primary.peer_agent_id ??
-			(primary.direction === "out"
-				? (rows.find((row) => row.direction === "in" && row.agent_id !== primary.agent_id)?.agent_id ?? null)
-				: (rows.find((row) => row.direction === "out" && row.agent_id !== primary.agent_id)?.agent_id ?? null));
-		unique.push({
-			...primary,
-			peer_agent_id: peerAgentId,
-			reply_to: primary.reply_to ?? rows.find((row) => row.reply_to !== null)?.reply_to ?? null,
-			text: primary.text ?? rows.find((row) => row.text !== null)?.text ?? null,
-			at: Math.min(...rows.map((row) => row.at)),
-		});
-	}
-	return unique.sort(
-		(a, b) => b.at - a.at || b.comm_id.localeCompare(a.comm_id) || a.agent_id.localeCompare(b.agent_id),
-	);
 }
 
 function toCommViews(comms: CommRow[], c: () => Ctx): CommView[] {
@@ -119,8 +88,8 @@ export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 				before = beforeNum;
 			}
 			const limit = clampedLimit(req.query.limit);
-			const fetchedRows = c().repos.comms.listConversation(a, b, before, (limit + 1) * 2);
-			const deduped = deduplicate(fetchedRows);
+			const fetchedRows = c().repos.comms.listConversation(a, b, before, (limit + 1) * 3);
+			const deduped = deduplicateCommRows(fetchedRows);
 			const hasNextPage = deduped.length > limit;
 			const page = deduped.slice(0, limit);
 			const items = toCommViews(page, c);
@@ -146,8 +115,8 @@ export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 		async (req) => {
 			const agentId = decodeURIComponent(req.params.agentId);
 			const limit = clampedLimit(req.query.limit);
-			const comms = c().repos.comms.listByAgent(agentId, limit * 2);
-			return { items: toCommViews(deduplicate(comms).slice(0, limit), c) };
+			const comms = c().repos.comms.listByAgent(agentId, limit * 3);
+			return { items: toCommViews(deduplicateCommRows(comms).slice(0, limit), c) };
 		},
 	);
 }

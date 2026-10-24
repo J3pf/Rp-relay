@@ -1,4 +1,4 @@
-import { type Answer, envelope, type PromptOpen, type PromptResolved } from "@j3pf/rp-protocol";
+import { type Answer, envelope, type PromptOpen, type PromptResolved, type PromptState } from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
 import type { PromptRow } from "../db/repos/index.js";
 import { MINUTE } from "../util/time.js";
@@ -20,6 +20,7 @@ export class PromptService {
 		const { repos, hub, summaries, publisher, dispatcher, mesh } = this.c();
 		const existing = repos.prompts.get(p.promptId);
 		if (existing) {
+			if (existing.agent_id !== agentId) return;
 			if (
 				existing.state === "cancelled" &&
 				existing.resolved_by === "relay_grace" &&
@@ -91,10 +92,22 @@ export class PromptService {
 		const { repos } = this.c();
 		const row = repos.prompts.get(r.promptId);
 		if (!row || row.agent_id !== agentId) return;
+		const req = this.answerReqs.get(r.promptId);
+		this.answerReqs.delete(r.promptId);
 		const state = r.by === "cancelled" ? "cancelled" : r.by === "timeout" ? "expired" : "resolved";
 		const prev = repos.prompts.close(r.promptId, state, r.by, r.answer ?? null, Date.now());
-		this.answerReqs.delete(r.promptId);
-		if (prev) this.afterClose(prev, r.by, r.answer ?? null, r.byDeviceId ?? null);
+		if (prev) {
+			this.afterClose(prev, r.by, r.answer ?? null, r.byDeviceId ?? null);
+			if (r.by !== "remote" && req?.conn) {
+				req.conn.send(
+					envelope(
+						"prompt.answer.result",
+						{ ok: false, reason: "already_resolved" },
+						req.reqId ? { re: req.reqId } : {},
+					),
+				);
+			}
+		}
 	}
 
 	/** El relay cancela por su cuenta (gracia tras desconexión, expiración). */
@@ -144,10 +157,10 @@ export class PromptService {
 		return { expired, repushed };
 	}
 
-	/** Cancela los prompts abiertos de un agente (tras la ventana de gracia sin reconexión). */
-	cancelOpenOfAgent(agentId: string): number {
+	/** Cancela los prompts abiertos de un agente (tras la ventana de gracia sin reconexión o revocación). */
+	cancelOpenOfAgent(agentId: string, states: PromptState[] = ["open"]): number {
 		let n = 0;
-		for (const row of this.c().repos.prompts.openForAgent(agentId, ["open"])) {
+		for (const row of this.c().repos.prompts.openForAgent(agentId, states)) {
 			this.cancelByRelay(row, "grace");
 			n++;
 		}
@@ -168,7 +181,7 @@ export class PromptService {
 		const { repos } = this.c();
 		const ids = new Set(incoming.map((p) => p.promptId));
 		for (const p of incoming) this.onPluginOpen(agentId, p);
-		for (const row of repos.prompts.openForAgent(agentId, ["open"])) {
+		for (const row of repos.prompts.openForAgent(agentId, ["open", "answered"])) {
 			if (ids.has(row.id)) continue;
 			// el plugin ya no lo muestra: se resolvió en la terminal mientras no había conexión
 			const prev = repos.prompts.close(row.id, "resolved", "local", null, Date.now());

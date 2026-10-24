@@ -10,7 +10,6 @@ import {
 	ErrorCode,
 	envelope,
 	errorEnvelope,
-	type HostSummary,
 	type MeshSubscribe,
 	MIN_PROTOCOL_VERSION,
 	PROTOCOL_VERSION,
@@ -127,29 +126,7 @@ export class AppSession {
 				if (this.conn.mode === "direct") {
 					dispatcher.flushDirect(this.device.id, (m) => this.conn.send(m));
 				} else {
-					const hostUpdates: HostSummary[] = repos.machines
-						.list()
-						.filter((m) => m.host_info || hub.hosts.has(m.id))
-						.map((m) => {
-							let info: Partial<HostSummary> = {};
-							if (m.host_info) {
-								try {
-									info = JSON.parse(m.host_info) as Partial<HostSummary>;
-								} catch {
-									info = {};
-								}
-							}
-							return {
-								machineId: m.id,
-								hostname: info.hostname ?? m.hostname ?? m.name,
-								roots: info.roots ?? [],
-								online: hub.hosts.has(m.id),
-								backends: info.backends ?? null,
-								defaultBackend: info.defaultBackend ?? null,
-								launchers: info.launchers ?? [],
-								defaultLauncher: info.defaultLauncher ?? null,
-							};
-						});
+					const hostUpdates = summaries.allHosts();
 					if (hostUpdates.length > 0) {
 						this.conn.send(envelope("hosts.update", { upsert: hostUpdates, remove: [] }));
 					}

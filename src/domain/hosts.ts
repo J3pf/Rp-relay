@@ -72,14 +72,25 @@ export class HostService {
 		const { hub, publisher, repos } = this.c();
 		if (!hub.unregisterHost(conn)) return;
 		if (!repos.db.open) return;
+		this.cancelPendingForMachine(conn.machineId);
+		publisher.host(conn.machineId);
+		publisher.machine(conn.machineId);
+	}
+
+	onMachineRevoked(machineId: string): void {
+		this.cancelPendingForMachine(machineId);
+		const prefix = `${machineId}\u0000`;
+		for (const k of this.held.keys()) if (k.startsWith(prefix)) this.held.delete(k);
+		for (const k of this.unclaimed.keys()) if (k.startsWith(prefix)) this.unclaimed.delete(k);
+	}
+
+	private cancelPendingForMachine(machineId: string): void {
 		for (const [id, p] of this.pending) {
-			if (p.machineId !== conn.machineId) continue;
+			if (p.machineId !== machineId) continue;
 			clearTimeout(p.timer);
 			this.pending.delete(id);
 			p.conn.send(errorEnvelope(ErrorCode.HostOffline, "el host se desconectó", p.reqEnvId));
 		}
-		publisher.host(conn.machineId);
-		publisher.machine(conn.machineId);
 	}
 
 	// ---- app → host ----

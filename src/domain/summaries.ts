@@ -1,4 +1,4 @@
-import type { AgentSummary, MachineQuota, MachineSummary, Prompt, PromptOpen } from "@j3pf/rp-protocol";
+import type { AgentSummary, HostSummary, MachineQuota, MachineSummary, Prompt, PromptOpen } from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
 import type { AgentRow, MachineRow, PromptRow } from "../db/repos/index.js";
 import { agentDisplayName, basename, disambiguateAgentNames } from "./agentNames.js";
@@ -123,6 +123,29 @@ export class Summaries {
 		const counts = repos.agents.counts();
 		const ob = repos.prompts.countOpenByAgent();
 		return repos.machines.list().map((m) => this.machine(m, counts, ob));
+	}
+
+	host(m: MachineRow): HostSummary {
+		const { hub } = this.c();
+		const info = parse<Partial<HostSummary>>(m.host_info) ?? {};
+		return {
+			machineId: m.id,
+			hostname: info.hostname ?? m.hostname ?? m.name,
+			roots: Array.isArray(info.roots) ? info.roots : [],
+			online: hub.hosts.has(m.id),
+			backends: info.backends ?? null,
+			defaultBackend: info.defaultBackend ?? null,
+			launchers: Array.isArray(info.launchers) ? info.launchers : [],
+			defaultLauncher: info.defaultLauncher ?? null,
+		};
+	}
+
+	allHosts(): HostSummary[] {
+		const { repos, hub } = this.c();
+		return repos.machines
+			.list()
+			.filter((m) => m.host_info || hub.hosts.has(m.id))
+			.map((m) => this.host(m));
 	}
 
 	allAgents(): AgentSummary[] {

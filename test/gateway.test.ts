@@ -574,6 +574,12 @@ describe("revocación", () => {
 		expect(full.entries.length).toBeLessThan(2);
 		expect(full.events.map((e) => e.seq)).toEqual([11, 12]);
 
+		// si prune elimina eventos tras el snapshot, marca truncated y needsResync
+		t.relay.ctx.repos.events.prune(Date.now() + 60_000, 5000);
+		const afterPrune = t.relay.ctx.history.build(agent.agentId, 10, agent.hello.epoch);
+		expect(afterPrune.truncated).toBe(true);
+		expect(afterPrune.needsResync).toBe(true);
+
 		agent.client.close();
 		app.close();
 	});

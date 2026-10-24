@@ -171,6 +171,22 @@ describe("prompts: primera respuesta gana", () => {
 		for (const c of [agent.client, app, direct]) c.close();
 	});
 
+	it("prompt.open con promptId de otro agente se ignora (R1-04)", async () => {
+		const { m, agent, app, direct } = await setup("p4-owner");
+		const agent2 = await connectAgent(t, m, "p4-other");
+		const p = promptBody(agent.agentId);
+		agent.client.send("prompt.open", p);
+		await app.next("prompt.opened");
+		agent.client.close();
+		await app.next("prompt.resolved", 3000);
+
+		// Otro agente intenta reabrir el promptId ajeno
+		agent2.client.send("prompt.open", p);
+		await sleep(80);
+		expect(t.relay.ctx.repos.prompts.get(p.promptId)!.state).toBe("cancelled");
+		for (const c of [agent2.client, app, direct]) c.close();
+	});
+
 	it("agente offline: la respuesta queda 'answered' y se entrega en agent.welcome.pendingAnswers", async () => {
 		const { dev, m, agent, app, direct } = await setup("p5");
 		const p = promptBody(agent.agentId);

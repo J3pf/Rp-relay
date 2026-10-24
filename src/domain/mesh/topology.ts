@@ -43,47 +43,16 @@ function endpoints(comm: CommRow): { from: string; to: string } | null {
 
 function compareRows(a: CommRow, b: CommRow): number {
 	if (a.direction !== b.direction) return a.direction === "out" ? -1 : 1;
-	if (a.at !== b.at) return b.at - a.at;
+	if (a.at !== b.at) return a.at - b.at;
 	return a.comm_id.localeCompare(b.comm_id);
 }
 
-function mergeMessageRows(rows: CommRow[]): TopologyMessage | null {
-	const ordered = [...rows].sort(compareRows);
-	const primary = ordered[0];
-	if (!primary) return null;
-	const primaryEndpoints = endpoints(primary);
-	const fromAgentId = primaryEndpoints?.from ?? (primary.direction === "out" ? primary.agent_id : undefined);
-	const toAgentId =
-		primaryEndpoints?.to ??
-		(primary.direction === "out"
-			? ordered.find((row) => row.direction === "in" && row.peer_agent_id === primary.agent_id)?.agent_id
-			: undefined);
-	if (!fromAgentId || !toAgentId) return null;
-	const replyTo = ordered.find((row) => row.reply_to !== null)?.reply_to ?? null;
-	const text =
-		ordered.find((row) => row.direction === primary.direction && row.text !== null)?.text ??
-		ordered.find((row) => row.text !== null)?.text ??
-		null;
-
-	return {
-		fromAgentId,
-		toAgentId,
-		messageId: primary.message_id,
-		replyTo,
-		action: primary.action,
-		text,
-		at: ordered.reduce((latest, row) => Math.max(latest, row.at), Number.NEGATIVE_INFINITY),
-		commId: primary.comm_id,
-	};
-}
-
-function deduplicateMessages(comms: CommRow[], agentIds: Set<string>): TopologyMessage[] {
+export function deduplicateCommRows(comms: CommRow[]): CommRow[] {
 	const byMessageId = new Map<string, CommRow[]>();
-	const messages: TopologyMessage[] = [];
+	const unique: CommRow[] = [];
 	for (const comm of comms) {
 		if (comm.message_id === null) {
-			const message = mergeMessageRows([comm]);
-			if (message) messages.push(message);
+			unique.push(comm);
 			continue;
 		}
 		const rows = byMessageId.get(comm.message_id) ?? [];
@@ -91,8 +60,44 @@ function deduplicateMessages(comms: CommRow[], agentIds: Set<string>): TopologyM
 		byMessageId.set(comm.message_id, rows);
 	}
 	for (const rows of byMessageId.values()) {
-		const message = mergeMessageRows(rows);
-		if (message) messages.push(message);
+		const ordered = [...rows].sort(compareRows);
+		const primary = ordered[0]!;
+		const peerAgentId =
+			primary.peer_agent_id ??
+			(primary.direction === "out"
+				? (ordered.find((row) => row.direction === "in" && row.agent_id !== primary.agent_id)?.agent_id ?? null)
+				: (ordered.find((row) => row.direction === "out" && row.agent_id !== primary.agent_id)?.agent_id ?? null));
+		unique.push({
+			...primary,
+			peer_agent_id: peerAgentId,
+			reply_to: primary.reply_to ?? ordered.find((row) => row.reply_to !== null)?.reply_to ?? null,
+			text:
+				ordered.find((row) => row.direction === primary.direction && row.text !== null)?.text ??
+				ordered.find((row) => row.text !== null)?.text ??
+				null,
+			at: Math.min(...ordered.map((row) => row.at)),
+		});
+	}
+	return unique.sort(
+		(a, b) => b.at - a.at || b.comm_id.localeCompare(a.comm_id) || a.agent_id.localeCompare(b.agent_id),
+	);
+}
+
+function deduplicateMessages(comms: CommRow[], agentIds: Set<string>): TopologyMessage[] {
+	const messages: TopologyMessage[] = [];
+	for (const row of deduplicateCommRows(comms)) {
+		const ep = endpoints(row);
+		if (!ep) continue;
+		messages.push({
+			fromAgentId: ep.from,
+			toAgentId: ep.to,
+			messageId: row.message_id,
+			replyTo: row.reply_to,
+			action: row.action,
+			text: row.text,
+			at: row.at,
+			commId: row.comm_id,
+		});
 	}
 
 	return messages

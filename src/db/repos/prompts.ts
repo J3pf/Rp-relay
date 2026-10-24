@@ -19,6 +19,13 @@ export interface PromptRow {
 }
 
 export class PromptsRepo {
+	private closeTx?: (
+		id: string,
+		state: "resolved" | "cancelled" | "expired",
+		by: string,
+		answerJson: string | null,
+		now: number,
+	) => PromptRow | undefined;
 	constructor(private db: DB) {}
 	get(id: string): PromptRow | undefined {
 		return stmt(this.db, "SELECT * FROM prompts WHERE id=?").get(id) as PromptRow | undefined;
@@ -55,13 +62,24 @@ export class PromptsRepo {
 		answer: unknown | null,
 		now: number,
 	): PromptRow | undefined {
-		const prev = this.get(id);
-		if (!prev || (prev.state !== "open" && prev.state !== "answered")) return undefined;
-		const res = stmt(
-			this.db,
-			"UPDATE prompts SET state=?, resolved_by=?, resolved_at=?, answer=COALESCE(?, answer) WHERE id=? AND state IN ('open','answered')",
-		).run(state, by, now, answer === null ? null : JSON.stringify(answer), id);
-		return res.changes > 0 ? prev : undefined;
+		this.closeTx ??= this.db.transaction(
+			(
+				promptId: string,
+				nextState: "resolved" | "cancelled" | "expired",
+				resolvedBy: string,
+				answerJson: string | null,
+				ts: number,
+			) => {
+				const prev = this.get(promptId);
+				if (!prev || (prev.state !== "open" && prev.state !== "answered")) return undefined;
+				const res = stmt(
+					this.db,
+					"UPDATE prompts SET state=?, resolved_by=?, resolved_at=?, answer=COALESCE(?, answer) WHERE id=? AND state IN ('open','answered')",
+				).run(nextState, resolvedBy, ts, answerJson, promptId);
+				return res.changes > 0 ? prev : undefined;
+			},
+		);
+		return this.closeTx(id, state, by, answer === null ? null : JSON.stringify(answer), now);
 	}
 	openForAgent(agentId: string, states: PromptState[] = ["open"]): PromptRow[] {
 		const qs = states.map(() => "?").join(",");

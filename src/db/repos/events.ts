@@ -66,7 +66,7 @@ export class EventsRepo {
 	snapshot(
 		agentId: string,
 		epoch: string,
-	): { seq: number; payload: { entries: unknown[]; truncated?: boolean } } | undefined {
+	): { seq: number; payload: { entries: unknown[]; truncated?: boolean; pruned?: boolean } } | undefined {
 		const r = stmt(this.db, "SELECT seq,payload FROM snapshots WHERE agent_id=? AND epoch=?").get(agentId, epoch) as
 			| { seq: number; payload: string }
 			| undefined;
@@ -74,16 +74,29 @@ export class EventsRepo {
 	}
 	/** Retención: por antigüedad y por cantidad por agente. */
 	prune(olderThan: number, perAgent: number): number {
+		const affectedAgents = new Set<string>();
+		for (const r of stmt(this.db, "SELECT DISTINCT agent_id FROM events WHERE ts<?").all(olderThan) as {
+			agent_id: string;
+		}[]) {
+			affectedAgents.add(r.agent_id);
+		}
 		let n = stmt(this.db, "DELETE FROM events WHERE ts<?").run(olderThan).changes;
 		const over = stmt(this.db, "SELECT agent_id, COUNT(*) AS c FROM events GROUP BY agent_id HAVING c>?").all(
 			perAgent,
 		) as { agent_id: string; c: number }[];
 		for (const o of over) {
+			affectedAgents.add(o.agent_id);
 			n += stmt(
 				this.db,
 				`DELETE FROM events WHERE agent_id=? AND rowid IN (
 					   SELECT rowid FROM events WHERE agent_id=? ORDER BY ts, seq LIMIT ?)`,
 			).run(o.agent_id, o.agent_id, o.c - perAgent).changes;
+		}
+		for (const agentId of affectedAgents) {
+			stmt(
+				this.db,
+				"UPDATE snapshots SET payload=json_set(payload, '$.truncated', json('true'), '$.pruned', json('true')) WHERE agent_id=?",
+			).run(agentId);
 		}
 		return n;
 	}

@@ -27,11 +27,12 @@ export class HistoryService {
 
 		let entries: Entry[] = [];
 		let from = 0;
+		const snapPruned = Boolean(snap?.payload.pruned);
 		const canResume =
 			sinceSeq !== null &&
 			epoch === cur &&
-			((first !== null && sinceSeq >= first - 1) ||
-				(first === null && snap !== undefined && sinceSeq >= snap.seq) ||
+			((first !== null && sinceSeq >= first - 1 && (!snapPruned || sinceSeq >= first)) ||
+				(first === null && snap !== undefined && !snapPruned && sinceSeq >= snap.seq && a.last_seq <= snap.seq) ||
 				sinceSeq >= a.last_seq);
 		if (canResume) {
 			from = sinceSeq!;
@@ -48,7 +49,7 @@ export class HistoryService {
 
 		let entryStart = 0;
 		let rowStart = 0;
-		let truncated = false;
+		let truncated = Boolean(snap && !canResume && (snap.payload.truncated || snapPruned));
 		while (entryStart < entries.length && totalBytes > FRAME_BUDGET) {
 			totalBytes -= entryBytes[entryStart]!;
 			entryStart++;
@@ -68,7 +69,7 @@ export class HistoryService {
 			entries,
 			events,
 			liveFromSeq: Math.max(a.last_seq, hub.agents.get(agentId)?.lastSeq ?? 0),
-			needsResync: !snap,
+			needsResync: !snap || snapPruned,
 		};
 		if (truncated) out.truncated = true;
 		return out;

@@ -14,17 +14,22 @@ export class EntityService {
 	}
 
 	revokeMachine(id: string): boolean {
-		const { repos, hub, prompts, publisher, mesh } = this.c();
+		const { repos, hub, prompts, publisher, hosts, mesh } = this.c();
 		const agents = repos.agents.byMachine(id);
+		for (const conn of hub.agentsOfMachine(id)) {
+			if (conn.agentId) repos.agents.setSeq(conn.agentId, conn.lastSeq);
+		}
 		const ok = repos.machines.revoke(id, Date.now());
 		if (!ok) return false;
 		hub.closeMachine(id, CloseCode.Unauthorized, "machine revoked");
+		hosts.onMachineRevoked(id);
 		for (const a of agents) {
-			prompts.cancelOpenOfAgent(a.id);
+			prompts.cancelOpenOfAgent(a.id, ["open", "answered"]);
 			repos.agents.setOffline(a.id, Date.now());
 			publisher.agentRemoved(a.id);
 		}
 		mesh.invalidate();
+		publisher.hostRemoved(id);
 		publisher.machineRemoved(id);
 		return true;
 	}

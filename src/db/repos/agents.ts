@@ -143,7 +143,8 @@ export class AgentsRepo {
 		this.deleteTx ??= this.db.transaction((agentId: string) => {
 			stmt(this.db, "DELETE FROM events WHERE agent_id=?").run(agentId);
 			stmt(this.db, "DELETE FROM snapshots WHERE agent_id=?").run(agentId);
-			stmt(this.db, "DELETE FROM prompts WHERE agent_id=? AND state NOT IN ('open','answered')").run(agentId);
+			stmt(this.db, "DELETE FROM prompts WHERE agent_id=?").run(agentId);
+			stmt(this.db, "DELETE FROM comms WHERE agent_id=?").run(agentId);
 			stmt(this.db, "DELETE FROM agents WHERE id=?").run(agentId);
 		});
 		this.deleteTx(id);

@@ -78,7 +78,7 @@ export class MeshService {
 				}
 			}
 			const openPromptsByAgent: Record<string, number> = Object.create(null);
-			for (const prompt of repos.prompts.list(["open"])) {
+			for (const prompt of repos.prompts.list(["open", "answered"])) {
 				openPromptsByAgent[prompt.agent_id] = (openPromptsByAgent[prompt.agent_id] ?? 0) + 1;
 			}
 			snapshot = buildMeshSnapshot({

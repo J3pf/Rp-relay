@@ -184,10 +184,12 @@ export class AgentService {
 		].includes(e.type);
 		const shouldTouch = isActivityEvent && now - (conn.lastTouchAt ?? 0) >= 15_000;
 
+		let inserted = true;
 		const applyDbWrites = () => {
 			if (persisted) {
-				repos.events.insert(agentId, ev.epoch, ev.seq, now, e.type, e);
+				inserted = repos.events.insert(agentId, ev.epoch, ev.seq, now, e.type, e);
 				repos.agents.setSeq(agentId, ev.seq);
+				if (!inserted) return;
 			}
 			switch (e.type) {
 				case "comm": {
@@ -277,6 +279,7 @@ export class AgentService {
 		if (persisted) repos.db.transaction(applyDbWrites)();
 		else applyDbWrites();
 		conn.lastSeq = ev.seq;
+		if (!inserted) return;
 
 		if (storedComm) {
 			this.c().mesh.invalidate();
@@ -368,10 +371,11 @@ export class AgentService {
 	}
 
 	forget(agentId: string): boolean {
-		const { repos, hub, publisher, messages, mesh } = this.c();
+		const { repos, hub, publisher, messages, prompts, mesh } = this.c();
 		const a = repos.agents.get(agentId);
 		if (!a || hub.agents.has(agentId)) return false;
 		this.clearGrace(agentId);
+		prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
 		repos.agents.delete(agentId);
 		mesh.invalidate();
 		messages.forget(agentId);

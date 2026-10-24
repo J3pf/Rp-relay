@@ -38,29 +38,22 @@ export class Publisher {
 	}
 
 	host(machineId: string): void {
-		const { repos, hub } = this.c();
+		const { repos, hub, summaries } = this.c();
 		const m = repos.machines.get(machineId);
 		if (!m || m.revoked_at) return;
-		const info = m.host_info ? (JSON.parse(m.host_info) as any) : {};
-		const online = hub.hosts.has(machineId);
 		hub.broadcastApps(
 			envelope("hosts.update", {
-				upsert: [
-					{
-						machineId,
-						hostname: info.hostname ?? m.hostname ?? m.name,
-						roots: info.roots ?? [],
-						online,
-						backends: info.backends ?? null,
-						defaultBackend: info.defaultBackend ?? null,
-						launchers: info.launchers ?? [],
-						defaultLauncher: info.defaultLauncher ?? null,
-					},
-				],
+				upsert: [summaries.host(m)],
 				remove: [],
 			}),
 			{ mode: "foreground" },
 		);
+	}
+
+	hostRemoved(machineId: string): void {
+		this.c().hub.broadcastApps(envelope("hosts.update", { upsert: [], remove: [machineId] }), {
+			mode: "foreground",
+		});
 	}
 
 	toApps(env: Envelope, mode?: "foreground" | "direct"): void {
