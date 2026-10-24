@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, mkdirSync, statSync } from "node:fs";
 import { readdir, rename, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { ulid } from "ulid";
@@ -9,6 +9,8 @@ import type { BlobRow } from "../db/repos/blobs.js";
 import type { Repos } from "../db/repos/index.js";
 import { RelayError } from "../util/errors.js";
 import { DAY } from "../util/time.js";
+
+export const BLOB_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const isControl = (ch: string): boolean => {
 	const c = ch.charCodeAt(0);
@@ -26,16 +28,23 @@ export function sanitizeName(name: string | undefined): string {
 }
 
 export class BlobStore {
+	private resolvedDir: string;
 	constructor(
 		private dir: string,
 		private repos: Repos,
 		private limits: { blobMaxBytes: number; blobTtlDays: number },
 	) {
-		mkdirSync(dir, { recursive: true });
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		this.resolvedDir = resolve(dir);
 	}
 
 	path(id: string): string {
-		return join(this.dir, id);
+		if (!BLOB_ID_RE.test(id)) throw new RelayError("not_found", "adjunto no encontrado");
+		const full = resolve(this.resolvedDir, id);
+		if (!full.startsWith(`${this.resolvedDir}${sep}`)) {
+			throw new RelayError("not_found", "adjunto no encontrado");
+		}
+		return full;
 	}
 
 	async save(stream: Readable, meta: { name?: string; mime?: string; uploadedBy: string }): Promise<BlobRow> {
@@ -72,7 +81,12 @@ export class BlobStore {
 			created_at: now,
 			expires_at: now + this.limits.blobTtlDays * DAY,
 		};
-		this.repos.blobs.insert(row);
+		try {
+			this.repos.blobs.insert(row);
+		} catch (e) {
+			await rm(this.path(id), { force: true });
+			throw e;
+		}
 		return row;
 	}
 
@@ -91,8 +105,9 @@ export class BlobStore {
 			this.repos.blobs.delete(b.id);
 			n++;
 		}
+		const files = await readdir(this.dir);
 		const known = new Set(this.repos.blobs.all().map((b) => b.id));
-		for (const f of await readdir(this.dir)) {
+		for (const f of files) {
 			const full = join(this.dir, f);
 			const id = f.replace(/\.part$/, "");
 			const st = await stat(full).catch(() => null);

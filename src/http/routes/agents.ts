@@ -30,7 +30,7 @@ export function registerAgents(app: FastifyInstance, c: () => Ctx, auth: HttpAut
 				["open", "answered", "resolved", "cancelled", "expired"].includes(s),
 			);
 			if (valid.length === 0) throw new RelayError("bad_request", "state inválido");
-			return { prompts: repos.prompts.list(valid).map((p) => summaries.prompt(p)) };
+			return { prompts: summaries.prompts(repos.prompts.list(valid)) };
 		},
 	);
 

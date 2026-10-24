@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import type { DB } from "../db/index.js";
@@ -9,11 +9,16 @@ const stamp = (d: Date) =>
 
 /** Copia consistente con `VACUUM INTO` (segura con el relay en marcha, modo WAL). */
 export function backupNow(db: DB, dir: string, at = new Date()): string {
-	mkdirSync(dir, { recursive: true });
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	let target = join(dir, `rp-${stamp(at)}.db`);
 	let n = 1;
 	while (existsSync(target)) target = join(dir, `rp-${stamp(at)}-${n++}.db`);
 	db.prepare("VACUUM INTO ?").run(target);
+	try {
+		chmodSync(target, 0o600);
+	} catch {
+		// sistemas de archivos sin permisos POSIX
+	}
 	return target;
 }
 
@@ -81,8 +86,21 @@ export function restoreBackup(backupFile: string, dbFile: string, at = new Date(
 	}
 	rmSync(`${dbFile}-wal`, { force: true });
 	rmSync(`${dbFile}-shm`, { force: true });
-	copyFileSync(backupFile, dbFile);
-	const after = verifyDb(dbFile);
-	if (!after.ok) throw new Error(`la base restaurada no pasó la verificación: ${after.detail}`);
+	try {
+		copyFileSync(backupFile, dbFile);
+		try {
+			chmodSync(dbFile, 0o600);
+		} catch {
+			// sistemas de archivos sin permisos POSIX
+		}
+		const after = verifyDb(dbFile);
+		if (!after.ok) throw new Error(`la base restaurada no pasó la verificación: ${after.detail}`);
+	} catch (e) {
+		if (previous && existsSync(previous)) {
+			rmSync(dbFile, { force: true });
+			renameSync(previous, dbFile);
+		}
+		throw e;
+	}
 	return { previous };
 }

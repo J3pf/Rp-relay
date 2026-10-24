@@ -4,19 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runDoctor } from "../src/cli/doctor.js";
-import { parseConfig } from "../src/config.js";
-import {
-	api,
-	Client,
-	cleanup,
-	connectAgent,
-	connectApp,
-	pairDevice,
-	pairMachine,
-	sleep,
-	startRelay,
-	type TestRelay,
-} from "./helpers.js";
+import { api, connectAgent, connectApp, pairDevice, pairMachine, startRelay, type TestRelay } from "./helpers.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const TSX = join(ROOT, "node_modules", ".bin", "tsx");
@@ -267,7 +255,7 @@ describe("CLI contra el relay en marcha (API de administración)", { timeout: 12
 			expect(rd.code).toBe(0);
 			expect((await app.waitClosed()).code).toBe(4001);
 			expect((await cli(["devices", "revoke", dev.deviceId], env)).code).toBe(1); // ya revocado
-			void direct;
+			direct.close();
 		});
 	});
 
@@ -304,8 +292,6 @@ describe("CLI contra el relay en marcha (API de administración)", { timeout: 12
 			// un token de dispositivo no sirve de admin
 			const dev = await pairDevice(t);
 			expect((await get({ authorization: `Bearer ${dev.deviceToken}` })).status).toBe(401);
-			void sleep;
-			void Client;
 		});
 	});
 });
@@ -334,7 +320,6 @@ describe("doctor (módulo)", () => {
 			expect(by("FCM").level).toBe("fail");
 			expect(by("FCM").detail).toContain("private_key");
 			expect(by("publicUrl alcanzable").level).toBe("fail");
-			void parseConfig;
 		} finally {
 			if (old === undefined) delete process.env.RP_CONFIG;
 			else process.env.RP_CONFIG = old;
@@ -342,4 +327,3 @@ describe("doctor (módulo)", () => {
 		}
 	});
 });
-void cleanup;

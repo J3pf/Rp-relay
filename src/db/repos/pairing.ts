@@ -9,6 +9,8 @@ export interface PairingRow {
 	meta: string | null;
 }
 
+export const MAX_ACTIVE_PAIRING_CODES = 50;
+
 export class PairingRepo {
 	constructor(private db: DB) {}
 	insert(c: {
@@ -25,6 +27,12 @@ export class PairingRepo {
 			c.createdBy,
 			c.meta === undefined ? null : JSON.stringify(c.meta),
 		);
+		stmt(
+			this.db,
+			`DELETE FROM pairing_codes WHERE used_at IS NULL AND code_hash IN (
+				SELECT code_hash FROM pairing_codes WHERE used_at IS NULL ORDER BY expires_at DESC LIMIT -1 OFFSET ?
+			)`,
+		).run(MAX_ACTIVE_PAIRING_CODES);
 	}
 	/** Consume el código de forma atómica; devuelve la fila sólo si era válido, del tipo pedido y no usado. */
 	consume(codeHash: Buffer, kind: "device" | "machine", now: number): PairingRow | undefined {

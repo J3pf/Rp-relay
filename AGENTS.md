@@ -4,16 +4,18 @@ Central HTTP/WebSocket relay server and push dispatcher for RemotePi. Bridges mo
 
 ## Tech Stack & Architecture
 
-- **Runtime**: Node.js >= 20, TypeScript (`tsc -b`), ESM.
-- **Framework & Libraries**: Fastify, `@fastify/type-provider-typebox`, `ws` (WebSockets), `better-sqlite3`, `zod`.
+- **Runtime**: Node.js >= 22, TypeScript (`tsc -b`), ESM.
+- **Framework & Libraries**: Fastify, `@sinclair/typebox`, `@fastify/type-provider-typebox`, `ws` (WebSockets in `noServer` mode), `better-sqlite3`.
 - **Formatting & Linting**: Biome (`npx biome check .`).
 - **Testing**: Vitest (`vitest run`).
 - **Core Domain**:
-  - `src/domain/`: Machines, Agents, Prompts, Sessions, and Push dispatch.
-  - `src/http/`: REST routes for pairing, machines, agents, attachments, and health checks.
-  - `src/ws/`: Real-time WebSocket hubs for client-relay and host-relay bidirectional communication.
-  - `src/db/`: SQLite schema migrations and repositories.
-  - `packages/protocol/`: Shared protocol definitions and test fixtures.
+  - `src/domain/`: Machines, Agents, Prompts, Messages, History, Hosts, Summaries, Publisher, and `mesh/` topology/comms.
+  - `src/push/`: Direct WebSocket push outbox, FCM HTTP v1 sender, AES-256-GCM encryption, and notification preferences.
+  - `src/http/`: REST routes for pairing, machines, agents, long-poll transport, attachments, mesh, admin, and health checks.
+  - `src/ws/`: Real-time WebSocket hubs for client-relay (`/ws/app`), agent-relay (`/ws/agent`), and host-relay (`/ws/host`) communication.
+  - `src/db/`: SQLite schema migrations (`migrations/0001_init.sql`..`0006_agent_comms.sql`) and repositories.
+  - `src/blobs/`, `src/backup/`, `src/tls/`: Attachment store & GC, SQLite `VACUUM INTO` backups/restore, and integrated TLS/ACME.
+  - `packages/protocol/`: Shared TypeBox protocol definitions (`@j3pf/rp-protocol`) and test fixtures.
 
 ## Commands
 

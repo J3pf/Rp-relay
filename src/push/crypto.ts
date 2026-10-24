@@ -22,6 +22,7 @@ export function encryptPush(key: Buffer, body: unknown, nonce: Buffer = randomBy
 export function decryptPush(key: Buffer, enc: EncryptedPush): string {
 	const nonce = Buffer.from(enc.n, "base64");
 	const all = Buffer.from(enc.c, "base64");
+	if (nonce.length !== 12 || all.length < 16) throw new Error("payload cifrado inválido");
 	const tag = all.subarray(all.length - 16);
 	const ct = all.subarray(0, all.length - 16);
 	const d = createDecipheriv("aes-256-gcm", key, nonce);

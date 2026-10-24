@@ -1,6 +1,6 @@
-import { NOTIFY_CATEGORIES, type NotifyCategory, type NotifyPrefs } from "@j3pf/rp-protocol";
+import type { NotifyCategory, NotifyPrefs, QuietHours } from "@j3pf/rp-protocol";
 
-export type QuietHours = { from: string; to: string; tz?: string };
+export type { QuietHours };
 
 const DEFAULTS: Record<NotifyCategory, boolean> = {
 	permission: true,
@@ -15,6 +15,7 @@ const dtfCache = new Map<string, Intl.DateTimeFormat>();
 function getFormatter(tz: string): Intl.DateTimeFormat {
 	let fmt = dtfCache.get(tz);
 	if (!fmt) {
+		if (dtfCache.size >= 100) dtfCache.clear();
 		fmt = new Intl.DateTimeFormat("en-GB", {
 			hour: "2-digit",
 			minute: "2-digit",
@@ -88,5 +89,3 @@ export function parsePrefs(json: string): NotifyPrefs {
 		return {};
 	}
 }
-
-export const isCategory = (s: string): s is NotifyCategory => (NOTIFY_CATEGORIES as readonly string[]).includes(s);

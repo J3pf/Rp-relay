@@ -308,11 +308,10 @@ describe("copias de seguridad y restauración", () => {
 		const t = await start();
 		await pairDevice(t);
 		await t.stop();
-		const { migrate } = await import("../src/db/migrate.js");
-		const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
+		const { migrate, readMigrations } = await import("../src/db/migrate.js");
+		const { mkdtempSync, writeFileSync } = await import("node:fs");
 		const { tmpdir } = await import("node:os");
 		const mdir = mkdtempSync(join(tmpdir(), "rp-mig-"));
-		const { readMigrations } = await import("../src/db/migrate.js");
 		for (const mig of readMigrations()) writeFileSync(join(mdir, mig.name), mig.sql);
 		const nextVer = Math.max(...readMigrations().map((m) => m.version)) + 1;
 		const nextName = `${String(nextVer).padStart(4, "0")}_extra.sql`;
@@ -330,6 +329,5 @@ describe("copias de seguridad y restauración", () => {
 		expect(applied).toEqual([nextVer]);
 		expect(backedUp).toBe(true);
 		expect(readdirSync(join(t.dir, "backups")).length).toBe(1);
-		void mkdirSync;
 	});
 });

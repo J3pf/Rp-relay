@@ -34,6 +34,8 @@ done
 
 [[ $EUID -eq 0 ]] || die "ejecuta con sudo"
 [[ -n "$PUBLIC_URL" ]] || die "falta --public-url (p. ej. https://relay.midominio.com)"
+[[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) || die "puerto inválido: $PORT"
+[[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] || die "NODE_MAJOR inválido"
 
 if [[ -r /etc/os-release ]]; then
   . /etc/os-release
@@ -110,6 +112,7 @@ systemctl restart rp-relay
 # 6. Caddy (TLS automático) — opcional
 if [[ $CADDY -eq 1 ]]; then
   DOMAIN="${PUBLIC_URL#*://}"; DOMAIN="${DOMAIN%%/*}"; DOMAIN="${DOMAIN%%:*}"
+  [[ "$DOMAIN" =~ ^[a-zA-Z0-9.-]+$ ]] || die "dominio inválido extraído de --public-url: $DOMAIN"
   log "Instalando Caddy para $DOMAIN"
   apt-get install -y debian-keyring debian-archive-keyring apt-transport-https gpg
   if [[ ! -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg ]]; then

@@ -70,8 +70,7 @@ describe("TLS integrado", () => {
 					.end();
 			});
 			expect(JSON.parse(body)).toMatchObject({ ok: true });
-			const m = await pairMachine(t).catch(() => null);
-			void m;
+			await pairMachine(t).catch(() => null);
 			const closed = await new Promise<number>((resolve, reject) => {
 				const ws = new WebSocket(`${t.ws}/ws/agent`, {
 					ca: readFileSync(join(dir, "long.crt")),

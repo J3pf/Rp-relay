@@ -70,8 +70,14 @@ export class Relay {
 	static async create(opts: RelayOptions): Promise<Relay> {
 		const { config } = opts;
 		const log = opts.log ?? createLogger(config.logLevel);
-		mkdirSync(config.dataDir, { recursive: true });
-		const db = openDb(dbPath(config));
+		mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
+		const dbFile = dbPath(config);
+		const db = openDb(dbFile);
+		try {
+			chmodSync(dbFile, 0o600);
+		} catch {
+			// sistemas de archivos sin permisos POSIX
+		}
 		migrate(db, {
 			beforeApply: (pending) => {
 				// reversibilidad: copia previa a aplicar migraciones sobre una base con datos
@@ -162,8 +168,15 @@ export class Relay {
 	}
 
 	private every(ms: number, fn: () => void | Promise<void>): void {
+		let running = false;
 		const t = setInterval(() => {
-			Promise.resolve(fn()).catch((e) => this.log.warn({ err: (e as Error).message }, "tarea periódica fallida"));
+			if (running) return;
+			running = true;
+			Promise.resolve(fn())
+				.catch((e) => this.log.warn({ err: (e as Error).message }, "tarea periódica fallida"))
+				.finally(() => {
+					running = false;
+				});
 		}, ms);
 		t.unref();
 		this.timers.push(t);
@@ -179,7 +192,10 @@ export class Relay {
 			const s = await runRetention(ctx);
 			log.info(s, "retención ejecutada");
 		});
-		const first = setTimeout(() => void runRetention(ctx).catch(() => {}), 5_000);
+		const first = setTimeout(
+			() => void runRetention(ctx).catch((e) => log.warn({ err: (e as Error).message }, "retención inicial fallida")),
+			5_000,
+		);
 		first.unref();
 		this.timers.push(first);
 		if (config.backup.enabled) {
@@ -237,30 +253,37 @@ export class Relay {
 			clearTimeout(t);
 		}
 		this.timers = [];
-		this.longPoll?.dispose();
-		ctx.hub.closeAll(CloseCode.ServiceRestart, "service restart");
-		// dar un instante a que los close frames salgan antes de cerrar los sockets
-		await new Promise((r) => setTimeout(r, 150));
-		// persistir el último seq visto de cada agente conectado
-		for (const c of ctx.hub.agents.values()) if (c.agentId) ctx.repos.agents.setSeq(c.agentId, c.lastSeq);
-		this.ws?.close();
-		await this.app?.close();
-		await this.acme?.close();
-		ctx.agents.dispose();
-		ctx.messages.dispose();
-		ctx.mesh.dispose();
-		ctx.hosts.dispose();
 		try {
-			this.db.pragma("wal_checkpoint(TRUNCATE)");
-		} catch {
-			// la DB puede estar ya cerrada
+			// persistir el último seq visto de cada agente conectado antes de cerrar el hub
+			for (const c of ctx.hub.agents.values()) if (c.agentId) ctx.repos.agents.setSeq(c.agentId, c.lastSeq);
+			this.longPoll?.dispose();
+			ctx.hub.closeAll(CloseCode.ServiceRestart, "service restart");
+			// dar un instante a que los close frames salgan antes de cerrar los sockets
+			await new Promise((r) => setTimeout(r, 150));
+			this.ws?.close();
+			await this.app?.close();
+			await this.acme?.close();
+			ctx.agents.dispose();
+			ctx.messages.dispose();
+			ctx.mesh.dispose();
+			ctx.hosts.dispose();
+		} finally {
+			try {
+				this.db.pragma("wal_checkpoint(TRUNCATE)");
+			} catch {
+				// la DB puede estar ya cerrada
+			}
+			try {
+				this.db.close();
+			} catch {
+				// la DB puede estar ya cerrada
+			}
+			log.info("rp-relay detenido");
 		}
-		this.db.close();
-		log.info("rp-relay detenido");
 	}
 }
 
-function ensureAdminToken(config: Config): void {
+export function ensureAdminToken(config: Config): void {
 	const f = adminTokenPath(config);
 	if (existsSync(f)) return;
 	writeFileSync(f, `${randomBytes(32).toString("base64url")}\n`, { mode: 0o600 });

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../context.js";
 import type { HttpAuth } from "../http/auth.js";
 import { RelayError } from "../util/errors.js";
+import { BLOB_ID_RE } from "./store.js";
 
 export function registerBlobRoutes(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
 	app.post("/v1/blobs", { preHandler: auth.device }, async (req, reply) => {
@@ -16,6 +17,7 @@ export function registerBlobRoutes(app: FastifyInstance, c: () => Ctx, auth: Htt
 	});
 
 	app.get<{ Params: { id: string } }>("/v1/blobs/:id", { preHandler: auth.deviceOrMachine }, async (req, reply) => {
+		if (!BLOB_ID_RE.test(req.params.id)) throw new RelayError("not_found", "adjunto no encontrado");
 		const { repos, blobs } = c();
 		const row = repos.blobs.get(req.params.id);
 		if (!row || row.expires_at <= Date.now()) throw new RelayError("not_found", "adjunto no encontrado o caducado");

@@ -113,7 +113,7 @@ describe("prompts: primera respuesta gana", () => {
 	});
 
 	it("carrera por WS: dos apps responden a la vez", async () => {
-		const { dev, agent, app, direct } = await setup("p2b");
+		const { agent, app, direct } = await setup("p2b");
 		const dev2 = await pairDevice(t, "Tablet");
 		const { client: app2 } = await connectApp(t, dev2);
 		const p = promptBody(agent.agentId, {
@@ -133,7 +133,6 @@ describe("prompts: primera respuesta gana", () => {
 		expect(r2.re).toBe(id2);
 		expect([r1, r2].filter((r) => (r.d as any).ok).length).toBe(1);
 		expect([r1, r2].find((r) => !(r.d as any).ok)!.d).toMatchObject({ reason: "already_resolved" });
-		void dev;
 		for (const c of [agent.client, app, app2, direct]) c.close();
 	});
 

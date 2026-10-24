@@ -54,9 +54,13 @@ export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 				req._rpMachine = m;
 				if (m.ok) return `mac:${m.row.id}`;
 			}
-			return req.ip;
+			return behindProxy ? req.ip : (req.raw.socket?.remoteAddress ?? req.ip);
 		},
-		allowList: (req) => req.url === "/healthz",
+		allowList: (req) => {
+			if (req.url !== "/healthz") return false;
+			const remote = req.raw.socket?.remoteAddress;
+			return remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+		},
 	});
 	await app.register(multipart, { limits: { fileSize: config.limits.blobMaxBytes + 1, files: 1, fields: 5 } });
 

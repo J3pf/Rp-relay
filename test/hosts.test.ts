@@ -4,7 +4,6 @@ import {
 	cleanup,
 	connectAgent,
 	connectApp,
-	helloBody,
 	pairDevice,
 	pairMachine,
 	sleep,
@@ -237,7 +236,6 @@ describe("rp-host (/ws/host)", () => {
 		const agent = await connectAgent(t, m, "sp3", { spawnId: "OLD" });
 		await agent.client.never("user.message", 150);
 		agent.client.close();
-		void helloBody;
 	});
 
 	it("dos apps enviando el mismo env.id en paralelo no colisionan en pending", async () => {

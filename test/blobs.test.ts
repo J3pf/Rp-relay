@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sanitizeName } from "../src/blobs/store.js";
 import {
-	api,
 	cleanup,
 	connectAgent,
 	connectApp,
@@ -178,4 +177,3 @@ describe("adjuntos (blobs)", () => {
 		expect(sanitizeName("x".repeat(500)).length).toBe(200);
 	});
 });
-void api;

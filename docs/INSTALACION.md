@@ -100,15 +100,15 @@ El teléfono necesita Tailscale activo. FCM, si lo configuras, sigue funcionando
 | `trustProxy` | auto | `RP_TRUST_PROXY` | Confiar en `X-Forwarded-For` (auto si escucha en loopback) |
 | `fcm.serviceAccountFile` | — | `RP_FCM_SERVICE_ACCOUNT_FILE` | Activa FCM (opcional) |
 | `tls` | — | `RP_TLS_CERT`+`RP_TLS_KEY` / `RP_ACME_DOMAIN`+`RP_ACME_EMAIL` | TLS integrado |
-| `backup` | `{enabled:true, intervalMinutes:60, keepDays:7}` | | Copias `VACUUM INTO` |
-| `limits.blobMaxBytes` | 26214400 | | Tamaño máx. de un adjunto |
-| `limits.blobTtlDays` | 7 | | Caducidad de adjuntos |
-| `limits.eventRetentionDays` / `eventsPerAgent` | 7 / 5000 | | Retención del historial |
-| `limits.offlineAgentRetentionDays` / `promptRetentionDays` | 7 / 30 | | Retención de agentes offline y prompts cerrados |
-| `limits.promptGraceSeconds` | 120 | | Gracia antes de cancelar prompts de un agente desconectado |
-| `limits.userMessageTimeoutMs` | 10000 | | Espera del `user.message.ack` del plugin |
-| `limits.maxBufferedBytes` / `hardBufferedBytes` | 1 MiB / 16 MiB | | Contrapresión por cliente (descarta deltas / cierra con 1013) |
-| `limits.pairAttemptsPerMinute` | 5 | | Intentos de emparejamiento por IP y minuto |
+| `backup` | `{enabled:true, intervalMinutes:60, keepDays:7}` | `RP_BACKUP_ENABLED` / `RP_BACKUP_INTERVAL_MINUTES` / `RP_BACKUP_KEEP_DAYS` | Copias `VACUUM INTO` |
+| `limits.blobMaxBytes` | 26214400 | `RP_BLOB_MAX_BYTES` | Tamaño máx. de un adjunto |
+| `limits.blobTtlDays` | 7 | `RP_BLOB_TTL_DAYS` | Caducidad de adjuntos |
+| `limits.eventRetentionDays` / `eventsPerAgent` | 7 / 5000 | `RP_EVENT_RETENTION_DAYS` / `RP_EVENTS_PER_AGENT` | Retención del historial |
+| `limits.offlineAgentRetentionDays` / `promptRetentionDays` | 7 / 30 | `RP_OFFLINE_AGENT_RETENTION_DAYS` / `RP_PROMPT_RETENTION_DAYS` | Retención de agentes offline y prompts cerrados |
+| `limits.promptGraceSeconds` | 120 | `RP_PROMPT_GRACE_SECONDS` | Gracia antes de cancelar prompts de un agente desconectado |
+| `limits.userMessageTimeoutMs` | 10000 | `RP_USER_MESSAGE_TIMEOUT_MS` | Espera del `user.message.ack` del plugin |
+| `limits.maxBufferedBytes` / `hardBufferedBytes` | 1 MiB / 16 MiB | `RP_MAX_BUFFERED_BYTES` / `RP_HARD_BUFFERED_BYTES` | Contrapresión por cliente (descarta deltas / cierra con 1013) |
+| `limits.pairAttemptsPerMinute` | 5 | `RP_PAIR_ATTEMPTS_PER_MINUTE` | Intentos de emparejamiento por IP y minuto |
 
 ## Firebase (opcional: sólo mejora la batería del teléfono)
 

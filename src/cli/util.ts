@@ -72,12 +72,22 @@ export async function adminCall<T = unknown>(
 					authorization: `Bearer ${token}`,
 					...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
 				},
-				// el certificado es del dominio público, no de 127.0.0.1; la llamada es sólo local
-				...(proto === "https" ? { rejectUnauthorized: false } : {}),
+				// el certificado es del dominio público, no de 127.0.0.1; sólo desactivar validación en loopback
+				...(proto === "https" && (host === "127.0.0.1" || host === "::1" || host === "localhost")
+					? { rejectUnauthorized: false }
+					: {}),
 			},
 			(res) => {
 				const chunks: Buffer[] = [];
-				res.on("data", (d) => chunks.push(d));
+				let totalBytes = 0;
+				res.on("data", (d: Buffer) => {
+					totalBytes += d.length;
+					if (totalBytes > 1024 * 1024) {
+						req.destroy(new Error("respuesta administrativa demasiado grande"));
+						return;
+					}
+					chunks.push(d);
+				});
 				res.on("end", () => {
 					let data: unknown = null;
 					try {

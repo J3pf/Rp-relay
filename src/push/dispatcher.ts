@@ -97,6 +97,7 @@ export class PushDispatcher {
 
 	/** Re-push de un prompt `danger=high` que sigue abierto. */
 	promptRepush(p: PromptRow): void {
+		this.c().repos.outbox.dropPromptDeliveries(p.id, Date.now());
 		this.promptOpened(p);
 	}
 
@@ -204,10 +205,17 @@ export class PushDispatcher {
 		const { repos, hub } = this.c();
 		const now = Date.now();
 		const machine = target ? repos.machines.get(target.machineId) : undefined;
-		const quiet: QuietHours | null = machine?.quiet_hours ? (JSON.parse(machine.quiet_hours) as QuietHours) : null;
+		let quiet: QuietHours | null = null;
+		if (machine?.quiet_hours) {
+			try {
+				quiet = JSON.parse(machine.quiet_hours) as QuietHours;
+			} catch {
+				quiet = null;
+			}
+		}
 		// "terminado" sólo si ningún dispositivo tiene la app en primer plano viendo ese agente (PLAN-RELAY §5.5)
 		if (target?.category === "settled" && target.agentId && hub.devicesViewing(target.agentId).size > 0) return [];
-		const results: PushResult[] = [];
+		const eligible: DeviceRow[] = [];
 		for (const d of repos.devices.active()) {
 			if (opts.only && !opts.only.includes(d.id)) continue;
 			if (opts.exclude && d.id === opts.exclude) continue;
@@ -224,9 +232,9 @@ export class PushDispatcher {
 				)
 					continue;
 			}
-			results.push(await this.deliver(d, kind, ref, body, now));
+			eligible.push(d);
 		}
-		return results;
+		return Promise.all(eligible.map((d) => this.deliver(d, kind, ref, body, now)));
 	}
 
 	private async deliver(
@@ -293,7 +301,14 @@ export class PushDispatcher {
 					continue;
 				}
 			}
-			if (send(envelope("push.notify", { pushId: row.push_id, k: row.kind, body: JSON.parse(row.body) }))) n++;
+			let parsedBody: unknown;
+			try {
+				parsedBody = JSON.parse(row.body);
+			} catch {
+				repos.outbox.ack(row.push_id, deviceId, now);
+				continue;
+			}
+			if (send(envelope("push.notify", { pushId: row.push_id, k: row.kind, body: parsedBody }))) n++;
 		}
 		return n;
 	}

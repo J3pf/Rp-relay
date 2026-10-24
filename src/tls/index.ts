@@ -29,6 +29,14 @@ export function needsRenewal(certPem: string | Buffer | null, now = Date.now()):
 type TlsConfig = NonNullable<Config["tls"]>;
 export const isFileTls = (t: TlsConfig): t is { cert: string; key: string } => "cert" in t;
 
+const hasControlChar = (s: string): boolean => {
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c < 0x20 || c === 0x7f) return true;
+	}
+	return false;
+};
+
 /** Servidor HTTP-01 de ACME en el puerto 80; el resto de peticiones se redirige a HTTPS. */
 export class AcmeChallengeServer {
 	private tokens = new Map<string, string>();
@@ -45,14 +53,19 @@ export class AcmeChallengeServer {
 	}
 	async listen(port: number, host = "0.0.0.0"): Promise<number> {
 		this.server = createServer((req, res) => {
-			const m = /^\/\.well-known\/acme-challenge\/([\w-]+)$/.exec(req.url ?? "");
+			const rawUrl = req.url ?? "/";
+			if (rawUrl.length > 2048 || hasControlChar(rawUrl)) {
+				res.writeHead(400, { "Content-Type": "text/plain" }).end("bad request");
+				return;
+			}
+			const m = /^\/\.well-known\/acme-challenge\/([\w-]+)$/.exec(rawUrl);
 			const ka = m ? this.tokens.get(m[1]!) : undefined;
 			if (ka) {
 				res.writeHead(200, { "Content-Type": "text/plain" }).end(ka);
 				return;
 			}
 			const parsed = new URL(this.publicUrl);
-			const safePath = (req.url ?? "/").replace(/^\/+/, "/");
+			const safePath = rawUrl.replace(/^\/+/, "/");
 			const qIdx = safePath.indexOf("?");
 			if (qIdx >= 0) {
 				parsed.pathname = safePath.slice(0, qIdx) || "/";

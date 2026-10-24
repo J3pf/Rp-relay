@@ -27,9 +27,13 @@ export async function serve(): Promise<Relay> {
 		log.fatal({ err: e.message, stack: e.stack }, "excepción no controlada");
 		shutdown("uncaughtException", 1);
 	});
-	process.on("unhandledRejection", (e) =>
-		log.error({ err: e instanceof Error ? e.message : String(e) }, "promesa rechazada sin manejar"),
-	);
+	process.on("unhandledRejection", (e) => {
+		log.fatal(
+			{ err: e instanceof Error ? e.message : String(e), stack: e instanceof Error ? e.stack : undefined },
+			"promesa rechazada sin manejar",
+		);
+		shutdown("unhandledRejection", 1);
+	});
 	return relay;
 }
 

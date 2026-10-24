@@ -42,21 +42,24 @@ Ver contexto en [ARQUITECTURA.md](ARQUITECTURA.md), [COMPATIBILIDAD.md](COMPATIB
 rp-relay/
 ├── packages/
 │   └── protocol/                 # @j3pf/rp-protocol  (compartido con rp-plugin)
-│       ├── src/{envelope,agent,app,prompt,push,http}.ts   # esquemas TypeBox + tipos
-│       ├── fixtures/*.json       # ejemplos válidos/ inválidos (tests de contrato de los 3 repos)
+│       ├── src/{common,envelope,agent,app,host,mesh,prompt,push,http,registry,validate}.ts
+│       ├── fixtures/*.json       # ejemplos válidos/inválidos (tests de contrato de los 3 repos)
 │       └── package.json
 ├── src/
 │   ├── main.ts                   # arranque, config, señales (SIGTERM → cierre ordenado)
+│   ├── relay.ts                  # ensamblaje de DB, servicios, HTTP, WS y timers
 │   ├── config.ts                 # carga /etc/rp-relay/config.json + env RP_*
 │   ├── db/{index.ts,migrate.ts,repos/*.ts}
 │   ├── auth/{tokens.ts,pairing.ts,middleware.ts}
-│   ├── ws/{agentGateway.ts,appGateway.ts,hub.ts}   # hub = registro en memoria de conexiones
-│   ├── domain/{agents.ts,events.ts,prompts.ts,messages.ts}
-│   ├── push/{direct.ts,fcm.ts,crypto.ts,dispatcher.ts}
-│   ├── blobs/{store.ts,routes.ts,gc.ts}
-│   ├── http/{routes/*.ts}
-│   └── cli/{index.ts,init.ts,pair.ts,devices.ts,machines.ts,doctor.ts}
-├── migrations/0001_init.sql
+│   ├── ws/{index.ts,conn.ts,longpoll.ts,agentGateway.ts,appGateway.ts,hostGateway.ts,hub.ts}
+│   ├── domain/{agents.ts,entities.ts,history.ts,hosts.ts,messages.ts,prompts.ts,publisher.ts,summaries.ts,mesh/*}
+│   ├── push/{crypto.ts,fcm.ts,prefs.ts,dispatcher.ts}
+│   ├── blobs/{store.ts,routes.ts}
+│   ├── backup/index.ts
+│   ├── tls/index.ts
+│   ├── http/{server.ts,auth.ts,routes/*.ts}
+│   └── cli/{index.ts,init.ts,pair.ts,devices.ts,machines.ts,doctor.ts,backup.ts,util.ts}
+├── migrations/0001_init.sql..0006_agent_comms.sql
 ├── deploy/{rp-relay.service, Caddyfile, docker-compose.yml, install.sh}
 ├── docs/
 └── test/

@@ -157,7 +157,7 @@ describe("retención", () => {
 	it("elimina eventos viejos y excedentes, agentes offline > 7 d, prompts cerrados > 30 d, adjuntos caducados", async () => {
 		const t = await startRelay({ limits: { eventsPerAgent: 10 } });
 		try {
-			const dev = await pairDevice(t);
+			await pairDevice(t);
 			const m = await pairMachine(t);
 			const agent = await connectAgent(t, m, "ret");
 			for (let i = 0; i < 25; i++)
@@ -213,7 +213,6 @@ describe("retención", () => {
 			s = await runRetention(ctx, Date.now() + 9 * DAY);
 			expect(s.agents).toBe(1);
 			expect(ctx.repos.agents.get(agent.agentId)).toBeUndefined();
-			void dev;
 		} finally {
 			await t.stop();
 			cleanup(t);

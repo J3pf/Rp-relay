@@ -158,9 +158,8 @@ export class Summaries {
 			.map((a) => this.agent(a, machines.get(a.machine_id), ob));
 	}
 
-	openPrompts(): Prompt[] {
+	prompts(rows: PromptRow[]): Prompt[] {
 		const { repos } = this.c();
-		const rows = repos.prompts.list(["open", "answered"]);
 		if (rows.length === 0) return [];
 		const batch = {
 			agents: new Map<string, AgentRow | undefined>(),
@@ -177,5 +176,9 @@ export class Summaries {
 			}
 		}
 		return rows.map((p) => this.prompt(p, batch));
+	}
+
+	openPrompts(): Prompt[] {
+		return this.prompts(this.c().repos.prompts.list(["open", "answered"]));
 	}
 }

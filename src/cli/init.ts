@@ -1,12 +1,12 @@
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { adminTokenPath, backupsDir, blobsDir, DEFAULT_CONFIG_PATH, dbPath, parseConfig } from "../config.js";
+import { backupsDir, blobsDir, DEFAULT_CONFIG_PATH, dbPath, parseConfig } from "../config.js";
 import { openDb } from "../db/index.js";
 import { migrate } from "../db/migrate.js";
 import { Repos } from "../db/repos/index.js";
+import { ensureAdminToken } from "../relay.js";
 import { c } from "./util.js";
 
 /** `rp-relay init`: crea la configuración, el directorio de datos y la base de datos (interactivo o con flags). */
@@ -64,15 +64,20 @@ export async function init(argv: string[]): Promise<void> {
 	}
 
 	mkdirSync(config.dataDir, { recursive: true, mode: 0o750 });
-	mkdirSync(blobsDir(config), { recursive: true });
-	mkdirSync(backupsDir(config), { recursive: true });
-	const db = openDb(dbPath(config));
+	mkdirSync(blobsDir(config), { recursive: true, mode: 0o700 });
+	mkdirSync(backupsDir(config), { recursive: true, mode: 0o700 });
+	const dbFile = dbPath(config);
+	const db = openDb(dbFile);
+	try {
+		chmodSync(dbFile, 0o600);
+	} catch {
+		// sistemas de archivos sin permisos POSIX
+	}
 	const applied = migrate(db);
 	const repos = new Repos(db);
 	const relayId = repos.meta.relayId();
 	db.close();
-	const tokenFile = adminTokenPath(config);
-	if (!existsSync(tokenFile)) writeFileSync(tokenFile, `${randomBytes(32).toString("base64url")}\n`, { mode: 0o600 });
+	ensureAdminToken(config);
 	console.log(
 		c.green(
 			`✓ base de datos lista en ${dbPath(config)}${applied.length ? ` (migraciones: ${applied.join(", ")})` : ""}`,
