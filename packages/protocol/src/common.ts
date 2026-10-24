@@ -4,7 +4,6 @@ export const Nullable = <T extends TSchema>(t: T) => Type.Union([t, Type.Null()]
 export const OptNullable = <T extends TSchema>(t: T) => Type.Optional(Type.Union([t, Type.Null()]));
 
 export const Id = Type.String({ minLength: 1, maxLength: 256 });
-export const Ts = Type.Number();
 
 export const QuotaWindow = Type.Object({
 	id: Type.String(),

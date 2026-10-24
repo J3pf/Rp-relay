@@ -63,6 +63,29 @@ describe("contrato: fixtures", () => {
 		expect(commsResult.ok, commsResult.ok ? "" : commsResult.message).toBe(true);
 	});
 
+	it("valida hosts.update con backends, defaultBackend, launchers y defaultLauncher", () => {
+		const res = validateMessage("appDown", {
+			v: 1,
+			t: "hosts.update",
+			d: {
+				upsert: [
+					{
+						machineId: "m-1",
+						hostname: "workstation",
+						roots: ["/home/dev"],
+						backends: { herdr: "0.9.3", tmux: "3.4", wt: false, console: true },
+						defaultBackend: "herdr",
+						launchers: ["gentle-shell", "pi"],
+						defaultLauncher: "gentle-shell",
+						online: true,
+					},
+				],
+				remove: ["m-old"],
+			},
+		});
+		expect(res.ok, res.ok ? "" : res.message).toBe(true);
+	});
+
 	it("consolida los eventos de inicio y fin de una comunicación por agente y commId", () => {
 		const db = openDb(":memory:");
 		try {

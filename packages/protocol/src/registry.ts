@@ -173,9 +173,15 @@ export function validateMessage(channel: Channel, env: Envelope): ValidationResu
 	return { ok: false, unknown: false, message: first ? `${first.path || "/"}: ${first.message}` : "cuerpo inválido" };
 }
 
+const schemaCompiled = new WeakMap<TSchema, Checker>();
+
 /** Compila y valida un valor suelto contra un esquema (rutas HTTP, tests). */
 export function validateSchema(schema: TSchema, value: unknown): ValidationResult {
-	const c = TypeCompiler.Compile(schema);
+	let c = schemaCompiled.get(schema);
+	if (!c) {
+		c = TypeCompiler.Compile(schema);
+		schemaCompiled.set(schema, c);
+	}
 	if (c.Check(value)) return { ok: true };
 	const first = [...c.Errors(value)][0];
 	return { ok: false, unknown: false, message: first ? `${first.path || "/"}: ${first.message}` : "valor inválido" };

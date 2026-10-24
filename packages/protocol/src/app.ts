@@ -8,7 +8,6 @@ import {
 	OptNullable,
 	PiEvent,
 	Prompt,
-	PromptResolved,
 	UserMessageAck,
 	UserMessageBody,
 } from "./common.js";
@@ -101,7 +100,6 @@ export const AppAgentEvent = Type.Object({
 	seq: Type.Integer({ minimum: 1 }),
 	e: PiEvent,
 });
-export const PromptResolvedApp = PromptResolved;
 export const TerminalWait = Type.Object({
 	agentId: Id,
 	kind: Type.Optional(Type.String()),

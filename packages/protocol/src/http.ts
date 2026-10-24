@@ -31,28 +31,22 @@ export const PushChannelReq = Type.Object({
 	fcmToken: Type.Optional(Nullable(Type.String())),
 	direct: Type.Boolean(),
 });
-export const MachinePatch = Type.Object({
-	name: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
-	context: Type.Optional(Type.String({ minLength: 1, maxLength: 40 })),
-	color: Type.Optional(Type.String({ pattern: "^#[0-9A-Fa-f]{6}$" })),
-	icon: Type.Optional(Nullable(Type.String({ maxLength: 40 }))),
-	quietHours: Type.Optional(
-		Nullable(
-			Type.Object({
-				from: Type.String({ pattern: "^\\d{2}:\\d{2}$" }),
-				to: Type.String({ pattern: "^\\d{2}:\\d{2}$" }),
-				tz: Type.Optional(Type.String()),
-			}),
-		),
-	),
-});
-export type MachinePatch = Static<typeof MachinePatch>;
-
 export const QuietHours = Type.Object({
 	from: Type.String({ pattern: "^\\d{2}:\\d{2}$" }),
 	to: Type.String({ pattern: "^\\d{2}:\\d{2}$" }),
 	tz: Type.Optional(Type.String()),
 });
+export type QuietHours = Static<typeof QuietHours>;
+
+export const MachinePatch = Type.Object({
+	name: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+	context: Type.Optional(Type.String({ minLength: 1, maxLength: 40 })),
+	color: Type.Optional(Type.String({ pattern: "^#[0-9A-Fa-f]{6}$" })),
+	icon: Type.Optional(Nullable(Type.String({ maxLength: 40 }))),
+	quietHours: Type.Optional(Nullable(QuietHours)),
+});
+export type MachinePatch = Static<typeof MachinePatch>;
+
 export const MachinePrefs = Type.Object({
 	mute: Type.Optional(Type.Boolean()),
 	categories: Type.Optional(NotifyCategoryMap),

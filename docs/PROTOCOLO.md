@@ -74,7 +74,7 @@ Códigos: `bad_request`, `unauthorized`, `not_found`, `conflict` (p. ej. prompt 
 ### `agent.snapshot` (tras `welcome`, y cuando el relay lo pide con `agent.resync`)
 Historial de la rama activa (últimas **200** entradas de `getBranch()`), ya normalizado:
 ```jsonc
-{ "epoch":"…", "seq": 57, "entries":[ Entry… ], "truncated": true }
+{ "epoch":"…", "seq": 57, "entries":[ Entry… ], "truncated": true, "lastActivityAt": 1760342400000 }
 ```
 `Entry` = `{ "eid": "<entryId de Pi>", "kind": "user"|"assistant"|"tool_result"|"bash"|"custom"|"compaction"|"branch_summary"|"model_change",
 "at": epochMs, "msg": { …mensaje de Pi tal cual (AgentMessage), con imágenes reemplazadas por {type:"image_ref",mimeType,bytes} } }`.
@@ -176,20 +176,20 @@ App → Relay:
 |---|---|---|
 | `app.hello` | `{ "deviceId", "app":{"version"}, "subscriptions":"all" }` | `app.welcome { machines:[MachineSummary], agents:[AgentSummary], openPrompts:[Prompt] }` |
 | `agent.subscribe` | `{ "agentId", "sinceSeq": 120 | null, "epoch": "…" | null }` | `agent.history { agentId, epoch, entries:[…], events:[…], liveFromSeq }` y luego eventos en vivo |
-| `agent.unsubscribe` | `{ "agentId" }` | — |
+| `agent.unsubscribe` | `{ "agentId" }` | `ack` (si incluye `id`) |
 | `user.message` | igual que §5 + `agentId` | `user.message.ack` (reenviado del plugin) o `error agent_offline` |
 | `agent.abort` | `{ "agentId" }` | `ack` |
 | `prompt.answer` | `{ "promptId", "answer" }` | `prompt.answer.result { ok, reason? }` (`reason`: `already_resolved` / `agent_offline_queued`) |
 | `agent.forget` | `{ "agentId" }` (borrar agente offline de la lista) | `ack` |
 | `mesh.subscribe` | `{ "machineId": "…" | null }` (null = todas las máquinas) | `mesh.snapshot` y actualizaciones en vivo |
-| `mesh.unsubscribe` | `{}` | — |
+| `mesh.unsubscribe` | `{}` | `ack` (si incluye `id`) |
 
 Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`, `agents.update { upsert:[AgentSummary], remove:[agentId] }`, `agent.event { agentId, epoch, seq, e }`,
 `prompt.opened { Prompt }`, `prompt.resolved { promptId, by, answer, byDeviceId? }`, `terminal_wait {agentId,…}`, `mesh.snapshot { machineId, generatedAt, groups, nodes, edges }`, `mesh.update` (actualización del snapshot), `mesh.comm { comm }` (comunicación normalizada en vivo).
 
-`AgentSummary` = `{ agentId, machineId, machineName, machineContext, machineColor, sessionName, cwd, gitBranch, model, status, online, lastSeenAt, openPromptCount, lastMessagePreview (≤140 chars), launcher, herdr, gentleMode, redacted, spawnedByHost }`.
+`AgentSummary` = `{ agentId, machineId, machineName, machineContext, machineColor, sessionName, cwd, gitBranch, model, status, online, lastSeenAt, openPromptCount, lastMessagePreview (≤140 chars), launcher, herdr, gentleMode, redacted, spawnedByHost, kind? }`.
 
-`MachineSummary` (en `app.welcome.machines` y `machines.update`) = `{ machineId, name, context:"personal"|"work"|string, color:"#RRGGBB", icon, online, agentCount, openPromptCount, hostOnline }`.
+`MachineSummary` (en `app.welcome.machines` y `machines.update`) = `{ machineId, name, context:"personal"|"work"|string, color:"#RRGGBB", icon, online, agentCount, openPromptCount, hostOnline, relayId?, quotas?: MachineQuota[] }`.
 
 ### Topología y comunicaciones del mesh
 
@@ -330,7 +330,7 @@ Semántica de topología, persistencia y conversación:
 | `GET` | `/v1/devices` / `DELETE /v1/devices/{id}` | device | listar / revocar |
 | `GET` | `/v1/machines` / `DELETE /v1/machines/{id}` | device | listar / revocar |
 | `PATCH` | `/v1/machines/{id}` | device | `{ name?, context?, color?, icon?, quietHours? }` |
-| `PUT` | `/v1/devices/me/prefs` | device | preferencias de notificación globales y por PC: `{ categories:{…}, machines:{ "<machineId>": { mute:false, categories:{…}, quietHours:{from:"20:00",to:"08:00",tz:"America/Bogota"} } } }` |
+| `GET` / `PUT` | `/v1/devices/me/prefs` | device | preferencias de notificación globales y por PC: `{ categories:{…}, machines:{ "<machineId>": { mute:false, categories:{…}, quietHours:{from:"20:00",to:"08:00",tz:"America/Bogota"} } }, criticalAlways? }` |
 | `POST` | `/v1/agent/send` · `/v1/agent/poll` | machine | transporte de respaldo long-poll del plugin: `send` recibe un array de mensajes del §4; `poll` espera hasta 25 s y devuelve un array de mensajes del §5 |
 | `GET` | `/v1/agents` | device | lista (fallback sin WS) |
 | `GET` | `/v1/mesh` | device | snapshot del mesh; `machineId` opcional (null o ausente = todas las máquinas) |
@@ -475,12 +475,15 @@ Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el det
 
 | Dirección | Tipo | Cuerpo |
 |---|---|---|
-| host → relay | `host.hello` | `{ machineId, hostname, roots:["/home/u/proyectos"], backends:{ herdr:"0.9.3"|null, tmux:"3.4"|null, wt:true|false, console:true|false }, defaultBackend:"herdr", launchers:["gentle-shell","pi"], defaultLauncher:"gentle-shell" }` |
+| host → relay | `host.hello` | `{ machineId, hostname, roots:["/home/u/proyectos"], backends:{ herdr:"0.9.3"|null, tmux:"3.4"|null, wt:true|false, console:true|false }, defaultBackend:"herdr", launchers:["gentle-shell","pi"], defaultLauncher:"gentle-shell", quotas?: MachineQuota[] }` |
+| host → relay | `host.quotas` | `{ quotas: MachineQuota[] }` |
 | app → relay → host | `host.list_dirs` | `{ machineId, path }` → `host.dirs { path, dirs:[nombre…] }` (sólo dentro de `roots`) |
 | app → relay → host | `host.herdr_layout` | `{ machineId }` → `host.herdr_layout.result { workspaces:[{id,label,cwd,tabs:[{id,label,panes:[{id,agent?}]}]}] }` |
 | app → relay → host | `host.spawn` | `{ machineId, cwd, name?, launcher?, backend?: "herdr"|"tmux"|"wt"|"console", herdrTarget?: {type:"workspace"} | {type:"tab", workspaceId} | {type:"split", paneId, direction:"right"|"down"}, initialPrompt?, sessionId? }` → `host.spawned { spawnId, backend, herdr:{workspaceId,paneId}|null, tmuxSession|null }` o `error` |
 | app → relay → host | `host.kill` | `{ machineId, spawnId }` (sólo agentes creados por el host) |
-| relay → app | `hosts.update` | `{ upsert:[{machineId, hostname, roots, online}], remove:[machineId] }` |
+| app → relay → host | `host.git_diff` | `{ machineId, cwd, path? }` → `host.git_diff.result { branch, files:[{path,status,additions,deletions,patch}], totalAdditions, totalDeletions }` |
+| app → relay → host | `host.git_discard` | `{ machineId, cwd, path }` → `host.git_discard.result { ok, path }` |
+| relay → app | `hosts.update` | `{ upsert:[{machineId, hostname, roots, backends?, defaultBackend?, launchers?, defaultLauncher?, online}], remove:[machineId] }` |
 
 `sessionId` (opcional): si se especifica, rp-host reanuda una sesión existente de Pi (`pi --session <sessionId>`) en lugar de iniciar una nueva.
 

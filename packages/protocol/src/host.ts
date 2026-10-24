@@ -1,16 +1,19 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { Id, MachineQuota, OptNullable } from "./common.js";
 
+export const HostBackends = Type.Object({
+	herdr: OptNullable(Type.String()),
+	tmux: OptNullable(Type.String()),
+	wt: Type.Optional(Type.Boolean()),
+	console: Type.Optional(Type.Boolean()),
+});
+export type HostBackends = Static<typeof HostBackends>;
+
 export const HostHello = Type.Object({
 	machineId: Id,
 	hostname: Type.String(),
 	roots: Type.Array(Type.String()),
-	backends: Type.Object({
-		herdr: OptNullable(Type.String()),
-		tmux: OptNullable(Type.String()),
-		wt: Type.Optional(Type.Boolean()),
-		console: Type.Optional(Type.Boolean()),
-	}),
+	backends: HostBackends,
 	defaultBackend: Type.Optional(Type.String()),
 	launchers: Type.Array(Type.String()),
 	defaultLauncher: Type.Optional(Type.String()),
@@ -104,9 +107,20 @@ export const HostGitDiscardResult = Type.Object({
 });
 export type HostGitDiscardResult = Static<typeof HostGitDiscardResult>;
 
+export const HostSummary = Type.Object({
+	machineId: Id,
+	hostname: Type.String(),
+	roots: Type.Array(Type.String()),
+	backends: OptNullable(HostBackends),
+	defaultBackend: OptNullable(Type.String()),
+	launchers: Type.Optional(Type.Array(Type.String())),
+	defaultLauncher: OptNullable(Type.String()),
+	online: Type.Boolean(),
+});
+export type HostSummary = Static<typeof HostSummary>;
+
 export const HostsUpdate = Type.Object({
-	upsert: Type.Array(
-		Type.Object({ machineId: Id, hostname: Type.String(), roots: Type.Array(Type.String()), online: Type.Boolean() }),
-	),
+	upsert: Type.Array(HostSummary),
 	remove: Type.Array(Id),
 });
+export type HostsUpdate = Static<typeof HostsUpdate>;
