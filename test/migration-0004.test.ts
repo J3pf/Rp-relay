@@ -66,7 +66,8 @@ describe("migration 0004_perf_indexes", () => {
 
 		// 3. Apply migration 0004 from canonical migrations directory
 		const upgradeApplied = migrate(db, { dir: MIGRATIONS_DIR });
-		expect(upgradeApplied).toEqual([4]);
+		// Later migrations may run in the same pass; this test specifically pins migration 0004.
+		expect(upgradeApplied).toContain(4);
 
 		// Idempotency: re-running migrate() applies nothing
 		expect(migrate(db, { dir: MIGRATIONS_DIR })).toEqual([]);

@@ -370,17 +370,22 @@ export class AgentService {
 		for (const id of ids) this.armGrace(id, config.limits.promptGraceSeconds * 1000);
 	}
 
-	forget(agentId: string): boolean {
-		const { repos, hub, publisher, messages, prompts, mesh } = this.c();
+	archive(agentId: string): boolean {
+		const { repos, publisher, prompts, mesh } = this.c();
 		const a = repos.agents.get(agentId);
-		if (!a || hub.agents.has(agentId)) return false;
+		if (!a || !repos.agents.archive(agentId, Date.now())) return false;
 		this.clearGrace(agentId);
 		prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
-		repos.agents.delete(agentId);
 		mesh.invalidate();
-		messages.forget(agentId);
 		publisher.agentRemoved(agentId);
 		publisher.machine(a.machine_id);
+		return true;
+	}
+
+	forget(agentId: string): boolean {
+		const { hub, messages } = this.c();
+		if (hub.agents.has(agentId) || !this.archive(agentId)) return false;
+		messages.forget(agentId);
 		return true;
 	}
 

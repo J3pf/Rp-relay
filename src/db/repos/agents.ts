@@ -34,6 +34,7 @@ export interface AgentRow {
 	last_preview: string | null;
 	first_seen_at: number;
 	last_seen_at: number;
+	archived_at: number | null;
 }
 
 const j = (v: unknown): string | null => (v === undefined || v === null ? null : JSON.stringify(v));
@@ -45,10 +46,29 @@ export class AgentsRepo {
 		return stmt(this.db, "SELECT * FROM agents WHERE id=?").get(id) as AgentRow | undefined;
 	}
 	list(): AgentRow[] {
+		return stmt(
+			this.db,
+			"SELECT * FROM agents WHERE archived_at IS NULL ORDER BY last_seen_at DESC",
+		).all() as AgentRow[];
+	}
+	listAll(): AgentRow[] {
 		return stmt(this.db, "SELECT * FROM agents ORDER BY last_seen_at DESC").all() as AgentRow[];
 	}
+	listArchived(limit: number, beforeArchivedAt?: number | null): AgentRow[] {
+		if (beforeArchivedAt == null) {
+			return stmt(this.db, "SELECT * FROM agents WHERE archived_at IS NOT NULL ORDER BY archived_at DESC LIMIT ?").all(
+				limit,
+			) as AgentRow[];
+		}
+		return stmt(
+			this.db,
+			"SELECT * FROM agents WHERE archived_at IS NOT NULL AND archived_at<? ORDER BY archived_at DESC LIMIT ?",
+		).all(beforeArchivedAt, limit) as AgentRow[];
+	}
 	byMachine(machineId: string): AgentRow[] {
-		return stmt(this.db, "SELECT * FROM agents WHERE machine_id=?").all(machineId) as AgentRow[];
+		return stmt(this.db, "SELECT * FROM agents WHERE machine_id=? AND archived_at IS NULL").all(
+			machineId,
+		) as AgentRow[];
 	}
 	/** Inserta o actualiza el agente a partir de `agent.hello`; reinicia `last_seq` si cambia el epoch. */
 	upsertFromHello(
@@ -136,6 +156,12 @@ export class AgentsRepo {
 	setThinking(id: string, thinking: string | null): void {
 		stmt(this.db, "UPDATE agents SET thinking=? WHERE id=?").run(thinking, id);
 	}
+	archive(id: string, now: number): boolean {
+		return (
+			stmt(this.db, "UPDATE agents SET archived_at=?, online=0 WHERE id=? AND archived_at IS NULL").run(now, id)
+				.changes > 0
+		);
+	}
 	resetEpoch(id: string, epoch: string): void {
 		stmt(this.db, "UPDATE agents SET epoch=?, last_seq=0 WHERE id=?").run(epoch, id);
 	}
@@ -154,20 +180,21 @@ export class AgentsRepo {
 		const ids = (
 			stmt(
 				this.db,
-				"SELECT id FROM agents WHERE online=0 AND last_seen_at<? AND id NOT IN (SELECT agent_id FROM prompts WHERE state IN ('open','answered'))",
+				"SELECT id FROM agents WHERE online=0 AND archived_at IS NULL AND last_seen_at<? AND id NOT IN (SELECT agent_id FROM prompts WHERE state IN ('open','answered'))",
 			).all(before) as { id: string }[]
 		).map((r) => r.id);
 		for (const id of ids) this.delete(id);
 		return ids;
 	}
 	deleteByMachine(machineId: string): void {
-		for (const a of this.byMachine(machineId)) this.delete(a.id);
+		const ids = stmt(this.db, "SELECT id FROM agents WHERE machine_id=?").all(machineId) as { id: string }[];
+		for (const { id } of ids) this.delete(id);
 	}
 	counts(): Map<string, { total: number; online: number }> {
 		const out = new Map<string, { total: number; online: number }>();
 		for (const r of stmt(
 			this.db,
-			"SELECT machine_id, COUNT(*) AS total, SUM(online) AS online FROM agents GROUP BY machine_id",
+			"SELECT machine_id, COUNT(*) AS total, SUM(online) AS online FROM agents WHERE archived_at IS NULL GROUP BY machine_id",
 		).all() as {
 			machine_id: string;
 			total: number;
