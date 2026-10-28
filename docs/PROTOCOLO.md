@@ -152,6 +152,11 @@ Tipos de `e` reenviados (forma idéntica a la de `docs/json.md` de Pi, con las r
 ```
 ### `prompt.resolved` — `{ "promptId":"…", "by":"local"|"remote"|"timeout"|"cancelled", "answer": Answer|null }`
 ### `prompt.ack` — `{ "promptId":"…", "accepted": true }` (respuesta a `prompt.answer`; `false` si ya estaba resuelto/no existe)
+### `agent.closed` — `{ "reason": "pane_closed" }`
+
+El plugin lo envía justo antes de cerrar el socket de un agente puenteado cuyo panel se cerró en el escritorio. El relay **archiva** el agente (desaparece de lista, mesh y push, pero conserva su historial) y publica `agents.update` con el `agentId` en `remove`. Sólo `pane_closed` produce archivo: la pérdida del socket por red o caída del proceso **no** archiva, sólo marca el agente como offline, como siempre. Un `agent.hello` posterior con el mismo `agentId` vuelve a hacerlo visible (sesión reanudada por herdr o `pi --continue`).
+
+La ubicación herdr llega en `agent.hello.herdr = { paneId, tabId?, workspaceId? }` (nullable); se considera que hay panel sólo si `paneId` es una cadena no vacía.
 ### `user.message.ack` — `{ "clientMsgId":"…", "disposition":"sent"|"queued_steer"|"queued_followup"|"typed"|"typed_after_dialog"|"command"|"duplicate"|"rejected", "method":"api"|"interactive"|"herdr", "error":null|"agent_blocked"|"herdr_unavailable"|"interactive_unavailable" }`
 
 ## 5. Relay → Plugin
@@ -180,7 +185,10 @@ App → Relay:
 | `user.message` | igual que §5 + `agentId` | `user.message.ack` (reenviado del plugin) o `error agent_offline` |
 | `agent.abort` | `{ "agentId" }` | `ack` |
 | `prompt.answer` | `{ "promptId", "answer" }` | `prompt.answer.result { ok, reason? }` (`reason`: `already_resolved` / `agent_offline_queued`) |
-| `agent.forget` | `{ "agentId" }` (borrar agente offline de la lista) | `ack` |
+| `agent.forget` | `{ "agentId" }` (archiva un agente offline: sale de la lista y conserva su historial) | `ack` |
+| `agent.close` | `{ "agentId" }` — cierra el panel de herdr del agente desde la app | `ack` (el `remove` llega por `agents.update`) o `error agent_close_unsupported` si el agente no corre en herdr; `host_offline`/`timeout` si el host no responde o falla |
+| `agent.archived` | `{ "machineId":"…"\|null, "before":epochMs\|null, "limit":1–100 }` (por defecto 50) | `agent.archived.list { agents:[ArchivedAgentSummary], nextBefore }` |
+| `agent.purge` | `{ "agentId" }` — borra de verdad el historial de un agente **archivado** | `ack` o `error conflict` (`solo se puede purgar un agente archivado` / `no se puede purgar un agente conectado`) |
 | `mesh.subscribe` | `{ "machineId": "…" | null }` (null = todas las máquinas) | `mesh.snapshot` y actualizaciones en vivo |
 | `mesh.unsubscribe` | `{}` | `ack` (si incluye `id`) |
 
@@ -188,6 +196,14 @@ Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`
 `prompt.opened { Prompt }`, `prompt.resolved { promptId, by, answer, byDeviceId? }`, `terminal_wait {agentId,…}`, `mesh.snapshot { machineId, generatedAt, groups, nodes, edges }`, `mesh.update` (actualización del snapshot), `mesh.comm { comm }` (comunicación normalizada en vivo).
 
 `AgentSummary` = `{ agentId, machineId, machineName, machineContext, machineColor, sessionName, cwd, gitBranch, model, status, online, lastSeenAt, openPromptCount, lastMessagePreview (≤140 chars), launcher, herdr, gentleMode, redacted, spawnedByHost, kind? }`.
+
+`ArchivedAgentSummary` = `{ agentId, machineId, machineName, sessionName, cwd, archivedAt, lastSeenAt, lastMessagePreview (≤140 chars), messageCount }`. Se ordena por `archivedAt` descendente; el filtro `machineId` se aplica en la consulta SQL. `nextBefore` es el `archivedAt` de la última fila devuelta **cuando la página viene llena** (cursor exclusivo para la petición siguiente) y `null` cuando la página no se llenó.
+
+### Ciclo de vida del agente: archivar y purgar
+
+Archivar oculta el agente sin destruir nada: se excluye de `app.welcome`, `agents.update`, `mesh.snapshot`/`mesh.update`, `agentCount` de `MachineSummary` y de todas las notificaciones push, mientras sus `events`, `snapshots`, `prompts` y `comms` siguen en la base de datos. Archivan: `agent.forget`, `agent.closed{pane_closed}` y un `agent.close` confirmado por el host.
+
+**Purgar es la única vía que destruye historial.** `agent.purge` exige un agente archivado, se niega con `conflict` si el agente está conectado o si nunca se archivó, y borra la fila junto con sus eventos, snapshots, prompts, comunicaciones y permisos de adjuntos. La retención periódica (`offlineAgentRetentionDays`) tampoco toca agentes archivados.
 
 `MachineSummary` (en `app.welcome.machines` y `machines.update`) = `{ machineId, name, context:"personal"|"work"|string, color:"#RRGGBB", icon, online, agentCount, openPromptCount, hostOnline, relayId?, quotas?: MachineQuota[] }`.
 
@@ -333,6 +349,8 @@ Semántica de topología, persistencia y conversación:
 | `GET` / `PUT` | `/v1/devices/me/prefs` | device | preferencias de notificación globales y por PC: `{ categories:{…}, machines:{ "<machineId>": { mute:false, categories:{…}, quietHours:{from:"20:00",to:"08:00",tz:"America/Bogota"} } }, criticalAlways? }` |
 | `POST` | `/v1/agent/send` · `/v1/agent/poll` | machine | transporte de respaldo long-poll del plugin: `send` recibe un array de mensajes del §4; `poll` espera hasta 25 s y devuelve un array de mensajes del §5 |
 | `GET` | `/v1/agents` | device | lista (fallback sin WS) |
+| `GET` | `/v1/agents/archived` | device | agentes archivados (`machineId`, `before`, `limit` 1–100) → mismo cuerpo que `agent.archived.list` |
+| `DELETE` | `/v1/agents/{id}` | device | purga definitiva de un agente archivado → `{ ok:true }` / `404` / `409` |
 | `GET` | `/v1/mesh` | device | snapshot del mesh; `machineId` opcional (null o ausente = todas las máquinas) |
 | `GET` | `/v1/mesh/conversation` | device | conversación entre `a` y `b`; acepta `before` y `limit` (1–100) |
 | `GET` | `/v1/mesh/agents/:agentId/comms` | device | comunicaciones del agente; acepta `limit` (1–100) |
@@ -481,6 +499,7 @@ Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el det
 | app → relay → host | `host.herdr_layout` | `{ machineId }` → `host.herdr_layout.result { workspaces:[{id,label,cwd,tabs:[{id,label,panes:[{id,agent?}]}]}] }` |
 | app → relay → host | `host.spawn` | `{ machineId, cwd, name?, launcher?, backend?: "herdr"|"tmux"|"wt"|"console", herdrTarget?: {type:"workspace"} | {type:"tab", workspaceId} | {type:"split", paneId, direction:"right"|"down"}, initialPrompt?, sessionId? }` → `host.spawned { spawnId, backend, herdr:{workspaceId,paneId}|null, tmuxSession|null }` o `error` |
 | app → relay → host | `host.kill` | `{ machineId, spawnId }` (sólo agentes creados por el host) |
+| relay → host | `host.herdr_close` | `{ machineId, paneId }` — lo origina `agent.close` de la app cuando el agente tiene `herdr.paneId` → `host.herdr_closed { paneId, ok, error?:string\|null }`. Sólo con `ok:true` el relay archiva el agente; si el panel no se cierra, o el host está desconectado o no responde en `hostRequestTimeoutMs`, la app recibe el error tipado (`conflict` con `reason:"herdr_close_failed"`, `host_offline` o `timeout`) y **no** se archiva nada |
 | app → relay → host | `host.git_diff` | `{ machineId, cwd, path? }` → `host.git_diff.result { branch, files:[{path,status,additions,deletions,patch}], totalAdditions, totalDeletions }` |
 | app → relay → host | `host.git_discard` | `{ machineId, cwd, path }` → `host.git_discard.result { ok, path }` |
 | relay → app | `hosts.update` | `{ upsert:[{machineId, hostname, roots, backends?, defaultBackend?, launchers?, defaultLauncher?, online}], remove:[machineId] }` |

@@ -26,6 +26,15 @@ Agent Mesh muestra la topología viva de agentes que se comunican entre sí en t
 - Conexiones activas animadas de los últimos 20 s y visualización de mensajes en vivo; el modo redactado oculta los textos y preserva la topología.
 - Suscripción WebSocket con `mesh.subscribe` / `mesh.unsubscribe`, actualizaciones coalescidas (≤2/s) y endpoints HTTP REST: `/v1/mesh`, `/v1/mesh/conversation` y `/v1/mesh/agents/:id/comms`.
 
+## Ciclo de vida de los agentes (herdr ⇄ app)
+
+Cerrar un agente se refleja en los dos sentidos, y el historial nunca se pierde por accidente:
+
+- **Cerrar el panel en herdr** → el plugin lo avisa con `agent.closed{pane_closed}` y el agente desaparece de la app (lista, mesh y notificaciones). Una caída de red o del proceso **no** borra nada: sólo lo marca offline.
+- **Olvidar en la app** → `agent.forget` archiva el agente; si además corre dentro de un panel de herdr, la app pide `agent.close` y el relay cierra el panel vía `rp-host` (`host.herdr_close`) antes de archivarlo. Si el host falla o no responde, no se archiva nada y la app recibe un error tipado.
+- **Archivar conserva el historial**: mensajes, eventos y comunicaciones siguen en SQLite y se pueden consultar con `agent.archived` / `GET /v1/agents/archived`, que devuelve un resumen por agente (incluido cuántos eventos conserva) paginado por cursor.
+- **Purgar es la única vía destructiva**: `agent.purge` / `DELETE /v1/agents/{id}` exige un agente archivado, se niega si está conectado y borra de verdad su historial. La retención periódica tampoco toca agentes archivados.
+
 ## Inicio rápido
 
 ```bash
