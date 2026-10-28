@@ -12,11 +12,14 @@ import type { AppConn, HostConn } from "../ws/conn.js";
 
 const INITIAL_PROMPT_TTL_MS = 60_000;
 
+type HostRequestResult = { ok: true; d: any } | { ok: false; code: string; message: string };
+
 interface PendingReq {
-	conn: AppConn;
+	conn?: AppConn;
 	machineId: string;
 	reqEnvId: string | undefined;
 	timer: NodeJS.Timeout;
+	resolve?: (result: HostRequestResult) => void;
 	initialPrompt?: string;
 }
 
@@ -29,6 +32,7 @@ interface HeldPrompt {
 const HOST_FORWARD: Record<string, number> = {
 	"host.list_dirs": 1,
 	"host.herdr_layout": 1,
+	"host.herdr_close": 1,
 	"host.spawn": 2,
 	"host.kill": 1,
 	"host.git_diff": 1,
@@ -71,8 +75,8 @@ export class HostService {
 	onHostClose(conn: HostConn): void {
 		const { hub, publisher, repos } = this.c();
 		if (!hub.unregisterHost(conn)) return;
-		if (!repos.db.open) return;
 		this.cancelPendingForMachine(conn.machineId);
+		if (!repos.db.open) return;
 		publisher.host(conn.machineId);
 		publisher.machine(conn.machineId);
 	}
@@ -89,7 +93,8 @@ export class HostService {
 			if (p.machineId !== machineId) continue;
 			clearTimeout(p.timer);
 			this.pending.delete(id);
-			p.conn.send(errorEnvelope(ErrorCode.HostOffline, "el host se desconectó", p.reqEnvId));
+			if (p.resolve) p.resolve({ ok: false, code: ErrorCode.HostOffline, message: "el host se desconectó" });
+			else p.conn?.send(errorEnvelope(ErrorCode.HostOffline, "el host se desconectó", p.reqEnvId));
 		}
 	}
 
@@ -128,6 +133,40 @@ export class HostService {
 		}
 	}
 
+	/** Sends an RPC initiated by the relay and resolves every failure as a result. */
+	request(machineId: string, t: string, d: any): Promise<HostRequestResult> {
+		return new Promise((resolve) => {
+			let id: string | undefined;
+			let timer: NodeJS.Timeout | undefined;
+			try {
+				const host = this.c().hub.hosts.get(machineId);
+				if (!host || host.closed) {
+					resolve({ ok: false, code: ErrorCode.HostOffline, message: "rp-host no está conectado en esa PC" });
+					return;
+				}
+				id = ulid();
+				timer = setTimeout(
+					() => {
+						this.pending.delete(id!);
+						resolve({ ok: false, code: ErrorCode.Timeout, message: "el host no respondió a tiempo" });
+					},
+					(HOST_FORWARD[t] ?? 1) * this.c().config.limits.hostRequestTimeoutMs,
+				);
+				timer.unref();
+				this.pending.set(id, { machineId, reqEnvId: undefined, timer, resolve });
+				if (!host.send(envelope(t, d, { id }))) {
+					clearTimeout(timer);
+					this.pending.delete(id);
+					resolve({ ok: false, code: ErrorCode.HostOffline, message: "no se pudo enviar al host" });
+				}
+			} catch {
+				if (timer) clearTimeout(timer);
+				if (id) this.pending.delete(id);
+				resolve({ ok: false, code: ErrorCode.HostOffline, message: "no se pudo enviar al host" });
+			}
+		});
+	}
+
 	// ---- host → app ----
 	onHostReply(conn: HostConn, env: Envelope): void {
 		if (!env.re) return;
@@ -135,11 +174,22 @@ export class HostService {
 		if (!p || p.machineId !== conn.machineId) return;
 		clearTimeout(p.timer);
 		this.pending.delete(env.re);
+		if (p.resolve) {
+			if (env.t === "error") {
+				const error = env.d as { code?: unknown; message?: unknown };
+				p.resolve({
+					ok: false,
+					code: typeof error?.code === "string" ? error.code : ErrorCode.Internal,
+					message: typeof error?.message === "string" ? error.message : "error interno",
+				});
+			} else p.resolve({ ok: true, d: env.d });
+			return;
+		}
 		if (env.t === "host.spawned" && p.initialPrompt) {
 			const spawnId = (env.d as { spawnId?: string }).spawnId;
 			if (spawnId) this.holdInitialPrompt(conn.machineId, spawnId, p.initialPrompt);
 		}
-		p.conn.send({ ...env, re: p.reqEnvId ?? env.re });
+		p.conn?.send({ ...env, re: p.reqEnvId ?? env.re });
 	}
 
 	private holdInitialPrompt(machineId: string, spawnId: string, text: string): void {

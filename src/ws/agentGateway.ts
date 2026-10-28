@@ -109,6 +109,9 @@ export class AgentSession {
 			case "agent.status":
 				agents.onStatus(this.conn, env.d as { status: string; detail?: string | null });
 				return;
+			case "agent.closed":
+				agents.onClosed(this.conn, env.d as { reason: string });
+				return;
 			case "agent.statuses":
 				agents.onStatuses(this.conn, (env.d as { items: Record<string, string | null> }).items);
 				return;

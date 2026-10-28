@@ -29,6 +29,12 @@ export type HostQuotas = Static<typeof HostQuotas>;
 export const HostListDirs = Type.Object({ machineId: Id, path: Type.String() });
 export const HostDirs = Type.Object({ path: Type.String(), dirs: Type.Array(Type.String()) });
 export const HostHerdrLayout = Type.Object({ machineId: Id });
+export const HostHerdrClose = Type.Object({ machineId: Id, paneId: Type.String({ minLength: 1 }) });
+export const HostHerdrClosed = Type.Object({
+	paneId: Type.String(),
+	ok: Type.Boolean(),
+	error: OptNullable(Type.String()),
+});
 const Pane = Type.Object({ id: Type.String(), agent: Type.Optional(Type.String()) });
 const Tab = Type.Object({ id: Type.String(), label: Type.String(), panes: Type.Array(Pane) });
 export const HostHerdrLayoutResult = Type.Object({

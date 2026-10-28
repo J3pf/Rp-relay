@@ -112,11 +112,12 @@ export class AgentsRepo {
 					 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?,?)`,
 			).run(h.agentId, machineId, ...vals, now, now);
 		} else {
+			// A live hello always makes the agent visible again.
 			stmt(
 				this.db,
 				`UPDATE agents SET kind=?,instance=?,epoch=?,session_id=?,session_name=?,session_file=?,launcher=?,herdr=?,gentle=?,gentle_mode=?,redacted=?,spawn_id=?,
 					 cwd=?,git_branch=?,git_dirty=?,model=?,thinking=?,status=?,status_detail=NULL,pid=?,pi_version=?,plugin_version=?,features=?,transport=?,
-					 online=1,last_seq=CASE WHEN ? THEN 0 ELSE last_seq END,last_seen_at=CASE WHEN ? THEN ? ELSE last_seen_at END WHERE id=?`,
+					 online=1,archived_at=NULL,last_seq=CASE WHEN ? THEN 0 ELSE last_seq END,last_seen_at=CASE WHEN ? THEN ? ELSE last_seen_at END WHERE id=?`,
 			).run(...vals, epochChanged ? 1 : 0, epochChanged ? 1 : 0, now, h.agentId);
 		}
 		return { row: this.get(h.agentId)!, epochChanged, previousSeq: prev && !epochChanged ? prev.last_seq : 0 };

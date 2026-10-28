@@ -21,6 +21,7 @@ export const ErrorCode = {
 	Conflict: "conflict",
 	AgentOffline: "agent_offline",
 	AgentTimeout: "agent_timeout",
+	AgentCloseUnsupported: "agent_close_unsupported",
 	HostOffline: "host_offline",
 	Timeout: "timeout",
 	TooLarge: "too_large",

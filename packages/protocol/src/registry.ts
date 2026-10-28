@@ -1,6 +1,7 @@
 import { type TSchema, Type } from "@sinclair/typebox";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import {
+	AgentClosed,
 	AgentEvent,
 	AgentHello,
 	AgentSnapshot,
@@ -12,6 +13,7 @@ import {
 	PromptCancel,
 } from "./agent.js";
 import {
+	AgentClose,
 	AgentHistory,
 	AgentRef,
 	AgentSubscribe,
@@ -36,6 +38,8 @@ import {
 	HostGitDiscard,
 	HostGitDiscardResult,
 	HostHello,
+	HostHerdrClose,
+	HostHerdrClosed,
 	HostHerdrLayout,
 	HostHerdrLayoutResult,
 	HostKill,
@@ -67,6 +71,7 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 		"agent.hello": AgentHello,
 		"agent.snapshot": AgentSnapshot,
 		"agent.event": AgentEvent,
+		"agent.closed": AgentClosed,
 		"agent.status": AgentStatusMsg,
 		"agent.statuses": AgentStatuses,
 		"prompt.open": PromptOpen,
@@ -91,6 +96,7 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 		"agent.abort": AgentRef,
 		"prompt.answer": AppPromptAnswer,
 		"agent.forget": AgentRef,
+		"agent.close": AgentClose,
 		"push.ack": PushAck,
 		"host.list_dirs": HostListDirs,
 		"host.herdr_layout": HostHerdrLayout,
@@ -130,6 +136,7 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 		"host.dirs": HostDirs,
 		"host.herdr_layout.result": HostHerdrLayoutResult,
 		"host.spawned": HostSpawned,
+		"host.herdr_closed": HostHerdrClosed,
 		"host.git_diff.result": HostGitDiffResult,
 		"host.git_discard.result": HostGitDiscardResult,
 		"host.quotas": HostQuotas,
@@ -139,6 +146,7 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 	hostDown: {
 		"host.list_dirs": HostListDirs,
 		"host.herdr_layout": HostHerdrLayout,
+		"host.herdr_close": HostHerdrClose,
 		"host.spawn": HostSpawn,
 		"host.kill": HostKill,
 		"host.git_diff": HostGitDiff,

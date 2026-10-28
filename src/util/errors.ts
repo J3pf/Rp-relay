@@ -19,6 +19,7 @@ export const httpStatus = (code: string): number => {
 		case ErrorCode.NotFound:
 			return 404;
 		case ErrorCode.Conflict:
+		case ErrorCode.AgentCloseUnsupported:
 			return 409;
 		case ErrorCode.AgentOffline:
 		case ErrorCode.HostOffline:

@@ -64,6 +64,7 @@ export const AgentSubscribe = Type.Object({
 	epoch: OptNullable(Type.String()),
 });
 export const AgentRef = Type.Object({ agentId: Id });
+export const AgentClose = Type.Object({ agentId: Id });
 export const AppUserMessage = Type.Composite([UserMessageBody, Type.Object({ agentId: Id })]);
 export const AppPromptAnswer = Type.Object({ promptId: Id, answer: Answer });
 export const PushAck = Type.Object({ pushId: Id });

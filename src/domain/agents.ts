@@ -10,9 +10,20 @@ import {
 import { Value } from "@sinclair/typebox/value";
 import type { Ctx } from "../context.js";
 import type { CommRow } from "../db/repos/comms.js";
-import type { MachineRow } from "../db/repos/index.js";
+import type { AgentRow, MachineRow } from "../db/repos/index.js";
+import { RelayError } from "../util/errors.js";
 import type { AgentConn } from "../ws/conn.js";
 import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolution.js";
+
+function paneBinding(row: AgentRow): string | null {
+	if (!row.herdr) return null;
+	try {
+		const herdr = JSON.parse(row.herdr);
+		return typeof herdr?.paneId === "string" && herdr.paneId.trim().length > 0 ? herdr.paneId : null;
+	} catch {
+		return null;
+	}
+}
 
 export function previewOf(e: any): string | null {
 	const m = e?.message;
@@ -368,6 +379,32 @@ export class AgentService {
 		repos.agents.setAllOffline(Date.now());
 		const ids = new Set(repos.prompts.list(["open"]).map((p) => p.agent_id));
 		for (const id of ids) this.armGrace(id, config.limits.promptGraceSeconds * 1000);
+	}
+
+	async close(agentId: string): Promise<void> {
+		const { repos, hosts } = this.c();
+		const agent = repos.agents.get(agentId);
+		if (!agent || agent.archived_at !== null) throw new RelayError("not_found", "agente desconocido");
+		const paneId = paneBinding(agent);
+		if (!paneId) throw new RelayError("agent_close_unsupported", "el agente no corre en un panel de herdr");
+		const machine = repos.machines.get(agent.machine_id);
+		if (!machine || machine.revoked_at) throw new RelayError("not_found", "PC desconocida");
+
+		const result = await hosts.request(machine.id, "host.herdr_close", { machineId: machine.id, paneId });
+		if (!result.ok) throw new RelayError(result.code as RelayError["code"], result.message);
+		if (result.d?.paneId !== paneId) throw new RelayError("internal", "respuesta del host no coincide con el panel");
+		if (result.d?.ok !== true) {
+			throw new RelayError(
+				"conflict",
+				`herdr no pudo cerrar el panel: ${result.d?.error ?? "error desconocido"}`,
+				"herdr_close_failed",
+			);
+		}
+		this.archive(agentId);
+	}
+
+	onClosed(conn: AgentConn, d: { reason: string }): void {
+		if (d.reason === "pane_closed" && conn.agentId) this.archive(conn.agentId);
 	}
 
 	archive(agentId: string): boolean {

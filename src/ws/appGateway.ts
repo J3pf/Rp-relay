@@ -1,4 +1,5 @@
 import {
+	type AgentClose,
 	type AgentRef,
 	type AgentSubscribe,
 	type Answer,
@@ -181,6 +182,17 @@ export class AppSession {
 				const d = env.d as Static<typeof AgentRef>;
 				messages.abort(d.agentId);
 				this.reply(env, "ack");
+				return;
+			}
+			case "agent.close": {
+				const d = env.d as Static<typeof AgentClose>;
+				agents
+					.close(d.agentId)
+					.then(() => this.reply(env, "ack"))
+					.catch((e) => {
+						if (e instanceof RelayError) this.conn.send(errorEnvelope(e.code, e.message, env.id, e.reason));
+						else this.conn.send(errorEnvelope(ErrorCode.Internal, "error interno", env.id));
+					});
 				return;
 			}
 			case "prompt.answer": {
