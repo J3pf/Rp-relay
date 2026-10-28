@@ -203,7 +203,9 @@ Relay → App: `machines.update { upsert:[MachineSummary], remove:[machineId] }`
 
 Archivar oculta el agente sin destruir nada: se excluye de `app.welcome`, `agents.update`, `mesh.snapshot`/`mesh.update`, `agentCount` de `MachineSummary` y de todas las notificaciones push, mientras sus `events`, `snapshots`, `prompts` y `comms` siguen en la base de datos. Archivan: `agent.forget`, `agent.closed{pane_closed}` y un `agent.close` confirmado por el host.
 
-**Purgar es la única vía que destruye historial.** `agent.purge` exige un agente archivado, se niega con `conflict` si el agente está conectado o si nunca se archivó, y borra la fila junto con sus eventos, snapshots, prompts, comunicaciones y permisos de adjuntos. La retención periódica (`offlineAgentRetentionDays`) tampoco toca agentes archivados.
+**Purgar es la única vía que destruye historial.** `agent.purge` exige un agente archivado, se niega con `conflict` si el agente está conectado o si nunca se archivó, y borra la fila junto con sus eventos, snapshots, prompts y comunicaciones. La retención periódica (eventos, comms y prompts cerrados) **tampoco toca agentes archivados**; los permisos de adjuntos no se ven afectados porque se indexan por blob y máquina, no por agente.
+
+Una respuesta enviada mientras el agente está desconectado queda en estado `answered` y se entrega cuando reconecte, pero el relay retira de inmediato la notificación del resto de dispositivos (`k:"cancel"`): una respuesta encolada no debe dejar notificaciones vivas hasta la entrega diferida.
 
 `MachineSummary` (en `app.welcome.machines` y `machines.update`) = `{ machineId, name, context:"personal"|"work"|string, color:"#RRGGBB", icon, online, agentCount, openPromptCount, hostOnline, relayId?, quotas?: MachineQuota[] }`.
 

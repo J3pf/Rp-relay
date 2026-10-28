@@ -447,8 +447,16 @@ export class AgentService {
 	}
 
 	forget(agentId: string): boolean {
-		const { hub, messages } = this.c();
-		if (hub.agents.has(agentId) || !this.archive(agentId)) return false;
+		const { repos, hub, messages } = this.c();
+		const a = repos.agents.get(agentId);
+		if (!a) return false;
+		if (hub.agents.has(agentId)) return false;
+		if (a.archived_at !== null) {
+			// Ya archivado: olvidarlo otra vez es un no-op idempotente, no un conflicto.
+			messages.forget(agentId);
+			return true;
+		}
+		if (!this.archive(agentId)) return false;
 		messages.forget(agentId);
 		return true;
 	}

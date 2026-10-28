@@ -74,17 +74,19 @@ export class EventsRepo {
 	}
 	/** Retención: por antigüedad y por cantidad por agente. Los agentes archivados se conservan hasta un purge explícito. */
 	prune(olderThan: number, perAgent: number): number {
-		const active = "agent_id NOT IN (SELECT id FROM agents WHERE archived_at IS NOT NULL)";
+		const notArchived = "agent_id NOT IN (SELECT id FROM agents WHERE archived_at IS NOT NULL)";
 		const affectedAgents = new Set<string>();
-		for (const r of stmt(this.db, `SELECT DISTINCT agent_id FROM events WHERE ts<? AND ${active}`).all(olderThan) as {
+		for (const r of stmt(this.db, `SELECT DISTINCT agent_id FROM events WHERE ts<? AND ${notArchived}`).all(
+			olderThan,
+		) as {
 			agent_id: string;
 		}[]) {
 			affectedAgents.add(r.agent_id);
 		}
-		let n = stmt(this.db, `DELETE FROM events WHERE ts<? AND ${active}`).run(olderThan).changes;
+		let n = stmt(this.db, `DELETE FROM events WHERE ts<? AND ${notArchived}`).run(olderThan).changes;
 		const over = stmt(
 			this.db,
-			`SELECT agent_id, COUNT(*) AS c FROM events WHERE ${active} GROUP BY agent_id HAVING c>?`,
+			`SELECT agent_id, COUNT(*) AS c FROM events WHERE ${notArchived} GROUP BY agent_id HAVING c>?`,
 		).all(perAgent) as { agent_id: string; c: number }[];
 		for (const o of over) {
 			affectedAgents.add(o.agent_id);
