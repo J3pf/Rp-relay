@@ -13,8 +13,11 @@ import {
 	PromptCancel,
 } from "./agent.js";
 import {
+	AgentArchived,
+	AgentArchivedList,
 	AgentClose,
 	AgentHistory,
+	AgentPurge,
 	AgentRef,
 	AgentSubscribe,
 	AgentsUpdate,
@@ -97,6 +100,8 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 		"prompt.answer": AppPromptAnswer,
 		"agent.forget": AgentRef,
 		"agent.close": AgentClose,
+		"agent.archived": AgentArchived,
+		"agent.purge": AgentPurge,
 		"push.ack": PushAck,
 		"host.list_dirs": HostListDirs,
 		"host.herdr_layout": HostHerdrLayout,
@@ -110,6 +115,7 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 	appDown: {
 		"app.welcome": AppWelcome,
 		"agent.history": AgentHistory,
+		"agent.archived.list": AgentArchivedList,
 		"machines.update": MachinesUpdate,
 		"agents.update": AgentsUpdate,
 		"agent.event": AppAgentEvent,

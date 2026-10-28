@@ -54,16 +54,22 @@ export class AgentsRepo {
 	listAll(): AgentRow[] {
 		return stmt(this.db, "SELECT * FROM agents ORDER BY last_seen_at DESC").all() as AgentRow[];
 	}
-	listArchived(limit: number, beforeArchivedAt?: number | null): AgentRow[] {
+	listArchived(limit: number, beforeArchivedAt?: number | null, machineId?: string | null): AgentRow[] {
+		const machine = machineId == null ? "" : " AND machine_id=?";
+		const args: unknown[] = [];
+		if (machineId != null) args.push(machineId);
 		if (beforeArchivedAt == null) {
-			return stmt(this.db, "SELECT * FROM agents WHERE archived_at IS NOT NULL ORDER BY archived_at DESC LIMIT ?").all(
-				limit,
-			) as AgentRow[];
+			args.push(limit);
+			return stmt(
+				this.db,
+				`SELECT * FROM agents WHERE archived_at IS NOT NULL${machine} ORDER BY archived_at DESC LIMIT ?`,
+			).all(...args) as AgentRow[];
 		}
+		args.push(beforeArchivedAt, limit);
 		return stmt(
 			this.db,
-			"SELECT * FROM agents WHERE archived_at IS NOT NULL AND archived_at<? ORDER BY archived_at DESC LIMIT ?",
-		).all(beforeArchivedAt, limit) as AgentRow[];
+			`SELECT * FROM agents WHERE archived_at IS NOT NULL${machine} AND archived_at<? ORDER BY archived_at DESC LIMIT ?`,
+		).all(...args) as AgentRow[];
 	}
 	byMachine(machineId: string): AgentRow[] {
 		return stmt(this.db, "SELECT * FROM agents WHERE machine_id=? AND archived_at IS NULL").all(

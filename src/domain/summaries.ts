@@ -1,4 +1,12 @@
-import type { AgentSummary, HostSummary, MachineQuota, MachineSummary, Prompt, PromptOpen } from "@j3pf/rp-protocol";
+import type {
+	AgentSummary,
+	ArchivedAgentSummary,
+	HostSummary,
+	MachineQuota,
+	MachineSummary,
+	Prompt,
+	PromptOpen,
+} from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
 import type { AgentRow, MachineRow, PromptRow } from "../db/repos/index.js";
 import { agentDisplayName, basename, disambiguateAgentNames } from "./agentNames.js";
@@ -156,6 +164,28 @@ export class Summaries {
 			.list()
 			.filter((a) => machines.get(a.machine_id) && !machines.get(a.machine_id)!.revoked_at)
 			.map((a) => this.agent(a, machines.get(a.machine_id), ob));
+	}
+
+	archived(rows: AgentRow[]): ArchivedAgentSummary[] {
+		const { repos } = this.c();
+		const machines = new Map(repos.machines.list().map((m) => [m.id, m]));
+		return rows.flatMap((a) => {
+			const m = machines.get(a.machine_id);
+			if (!m || a.archived_at === null) return [];
+			return [
+				{
+					agentId: a.id,
+					machineId: a.machine_id,
+					machineName: m.name,
+					sessionName: a.session_name,
+					cwd: a.cwd,
+					archivedAt: a.archived_at,
+					lastSeenAt: a.last_seen_at,
+					lastMessagePreview: a.last_preview,
+					messageCount: repos.events.count(a.id),
+				},
+			];
+		});
 	}
 
 	prompts(rows: PromptRow[]): Prompt[] {

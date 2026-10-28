@@ -1,5 +1,7 @@
 import {
+	type AgentArchived,
 	type AgentClose,
+	type AgentPurge,
 	type AgentRef,
 	type AgentSubscribe,
 	type Answer,
@@ -193,6 +195,17 @@ export class AppSession {
 						if (e instanceof RelayError) this.conn.send(errorEnvelope(e.code, e.message, env.id, e.reason));
 						else this.conn.send(errorEnvelope(ErrorCode.Internal, "error interno", env.id));
 					});
+				return;
+			}
+			case "agent.archived": {
+				const d = env.d as Static<typeof AgentArchived>;
+				this.reply(env, "agent.archived.list", agents.listArchived(d));
+				return;
+			}
+			case "agent.purge": {
+				const d = env.d as Static<typeof AgentPurge>;
+				agents.purge(d.agentId);
+				this.reply(env, "ack");
 				return;
 			}
 			case "prompt.answer": {

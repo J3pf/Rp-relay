@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "t": "agent.archived",
+  "ts": 1760342400000,
+  "id": "01JA0000000000000000000M03",
+  "d": {
+    "machineId": "machine-1",
+    "before": null,
+    "limit": 25
+  }
+}

@@ -1,4 +1,4 @@
-import { AgentMessageReq, type Answer as AnswerT, PromptAnswerReq } from "@j3pf/rp-protocol";
+import { AgentMessageReq, type Answer as AnswerT, Id, PromptAnswerReq } from "@j3pf/rp-protocol";
 import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
@@ -6,6 +6,26 @@ import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
 
 export function registerAgents(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
+	app.get<{ Querystring: { machineId?: string; before?: number; limit?: number } }>(
+		"/v1/agents/archived",
+		{
+			schema: {
+				querystring: Type.Object({
+					machineId: Type.Optional(Id),
+					before: Type.Optional(Type.Number()),
+					limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+				}),
+			},
+			preHandler: auth.device,
+		},
+		async (req) => c().agents.listArchived(req.query),
+	);
+
+	app.delete<{ Params: { id: string } }>("/v1/agents/:id", { preHandler: auth.device }, async (req) => {
+		c().agents.purge(req.params.id);
+		return { ok: true };
+	});
+
 	app.get("/v1/agents", { preHandler: auth.device }, async () => ({ agents: c().summaries.allAgents() }));
 
 	app.post<{ Params: { id: string } }>(

@@ -2,6 +2,7 @@ import {
 	type AgentEvent,
 	type AgentHello,
 	type AgentSnapshot,
+	type ArchivedAgentSummary,
 	CommEvent,
 	envelope,
 	isDroppableEvent,
@@ -405,6 +406,32 @@ export class AgentService {
 
 	onClosed(conn: AgentConn, d: { reason: string }): void {
 		if (d.reason === "pane_closed" && conn.agentId) this.archive(conn.agentId);
+	}
+
+	listArchived(args: { machineId?: string | null; before?: number | null; limit?: number } = {}): {
+		agents: ArchivedAgentSummary[];
+		nextBefore: number | null;
+	} {
+		const { repos, summaries } = this.c();
+		const limit = args.limit ?? 50;
+		const rows = repos.agents.listArchived(limit, args.before, args.machineId);
+		return {
+			agents: summaries.archived(rows),
+			nextBefore: rows.length === limit ? rows[rows.length - 1]!.archived_at : null,
+		};
+	}
+
+	purge(agentId: string): void {
+		const { repos, hub, messages, mesh } = this.c();
+		const agent = repos.agents.get(agentId);
+		if (!agent) throw new RelayError("not_found", "agente desconocido");
+		if (hub.agents.has(agentId)) throw new RelayError("conflict", "no se puede purgar un agente conectado");
+		if (agent.archived_at === null) throw new RelayError("conflict", "solo se puede purgar un agente archivado");
+
+		this.clearGrace(agentId);
+		repos.agents.delete(agentId);
+		messages.forget(agentId);
+		mesh.invalidate();
 	}
 
 	archive(agentId: string): boolean {
