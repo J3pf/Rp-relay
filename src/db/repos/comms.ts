@@ -168,13 +168,14 @@ export class CommsRepo {
 
 	prune(retentionDays = 7, maxRows = 20_000, now = Date.now()): number {
 		this.pruneTx ??= this.db.transaction((days: number, max: number, currentTime: number) => {
-			let deleted = stmt(this.db, "DELETE FROM comms WHERE at<?").run(currentTime - days * DAY).changes;
-			const remaining = (stmt(this.db, "SELECT COUNT(*) AS n FROM comms").get() as { n: number }).n;
+			const active = "agent_id NOT IN (SELECT id FROM agents WHERE archived_at IS NOT NULL)";
+			let deleted = stmt(this.db, `DELETE FROM comms WHERE at<? AND ${active}`).run(currentTime - days * DAY).changes;
+			const remaining = (stmt(this.db, `SELECT COUNT(*) AS n FROM comms WHERE ${active}`).get() as { n: number }).n;
 			if (remaining > max) {
 				deleted += stmt(
 					this.db,
-					`DELETE FROM comms WHERE rowid IN (
-						SELECT rowid FROM comms ORDER BY at ASC, agent_id ASC, comm_id ASC LIMIT ?
+					`DELETE FROM comms WHERE ${active} AND rowid IN (
+						SELECT rowid FROM comms WHERE ${active} ORDER BY at ASC, agent_id ASC, comm_id ASC LIMIT ?
 					)`,
 				).run(remaining - max).changes;
 			}

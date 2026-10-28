@@ -148,7 +148,10 @@ export class PromptsRepo {
 		return expired;
 	}
 	purgeClosed(before: number): number {
-		return stmt(this.db, "DELETE FROM prompts WHERE state NOT IN ('open','answered') AND resolved_at<?").run(before)
-			.changes;
+		return stmt(
+			this.db,
+			`DELETE FROM prompts WHERE state NOT IN ('open','answered') AND resolved_at<?
+				 AND agent_id NOT IN (SELECT id FROM agents WHERE archived_at IS NOT NULL)`,
+		).run(before).changes;
 	}
 }
