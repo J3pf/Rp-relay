@@ -5,7 +5,7 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
-## [Unreleased]
+## [0.6.0] - 2026-10-29
 
 ### Release sin npm (publicación diferida)
 - **El GitHub Release ya no depende del job `npm`:** `github-release` espera sólo a `docker` (la imagen de ghcr es la entrega real hoy), y `verify` sigue siendo el gate obligatorio con el chequeo etiqueta ⇄ versión de los paquetes, lint, build, typecheck y tests. Antes, `needs: [npm, docker]` con un `NPM_TOKEN` inexistente dejaba el siguiente tag `v*` **sin GitHub Release**.
