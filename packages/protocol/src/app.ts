@@ -51,6 +51,19 @@ export const AgentSummary = Type.Object({
 });
 export type AgentSummary = Static<typeof AgentSummary>;
 
+export const ArchivedAgentSummary = Type.Object({
+	agentId: Id,
+	machineId: Id,
+	machineName: Type.String(),
+	sessionName: OptNullable(Type.String()),
+	cwd: OptNullable(Type.String()),
+	archivedAt: Type.Number(),
+	lastSeenAt: Type.Number(),
+	lastMessagePreview: OptNullable(Type.String({ maxLength: 140 })),
+	messageCount: Type.Integer({ minimum: 0 }),
+});
+export type ArchivedAgentSummary = Static<typeof ArchivedAgentSummary>;
+
 // ---- App → Relay (PROTOCOLO §6) ----
 
 export const AppHello = Type.Object({
@@ -64,12 +77,23 @@ export const AgentSubscribe = Type.Object({
 	epoch: OptNullable(Type.String()),
 });
 export const AgentRef = Type.Object({ agentId: Id });
+export const AgentClose = Type.Object({ agentId: Id });
+export const AgentArchived = Type.Object({
+	machineId: OptNullable(Id),
+	before: OptNullable(Type.Number()),
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+});
+export const AgentPurge = Type.Object({ agentId: Id });
 export const AppUserMessage = Type.Composite([UserMessageBody, Type.Object({ agentId: Id })]);
 export const AppPromptAnswer = Type.Object({ promptId: Id, answer: Answer });
 export const PushAck = Type.Object({ pushId: Id });
 
 // ---- Relay → App ----
 
+export const AgentArchivedList = Type.Object({
+	agents: Type.Array(ArchivedAgentSummary),
+	nextBefore: OptNullable(Type.Number()),
+});
 export const AppWelcome = Type.Object({
 	machines: Type.Array(MachineSummary),
 	agents: Type.Array(AgentSummary),

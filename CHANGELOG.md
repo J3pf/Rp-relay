@@ -5,6 +5,20 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
+## [Unreleased]
+
+### Release sin npm (publicación diferida)
+- **El GitHub Release ya no depende del job `npm`:** `github-release` espera sólo a `docker` (la imagen de ghcr es la entrega real hoy), y `verify` sigue siendo el gate obligatorio con el chequeo etiqueta ⇄ versión de los paquetes, lint, build, typecheck y tests. Antes, `needs: [npm, docker]` con un `NPM_TOKEN` inexistente dejaba el siguiente tag `v*` **sin GitHub Release**.
+- **Publicación en npm diferida:** `@j3pf/rp-relay` y `@j3pf/rp-protocol` nunca se publicaron (404 en el registro). El job `npm` queda detrás de la variable de repositorio `RP_PUBLISH_NPM=true` y de un secreto `NPM_TOKEN` real; por defecto no corre y no bloquea nada.
+- **Guarda contra regresiones:** `test/release-workflow.test.ts` falla si una edición futura vuelve a acoplar `github-release` al job de npm, si saca `verify` del grafo de dependencias del release o si el token de npm aparece fuera del job opt-in.
+- **Documentado en** `docs/INSTALACION.md` (operación): canales de entrega actuales = imagen ghcr + GitHub Release.
+
+### Agent Lifecycle Sync (herdr ⇄ app)
+- **Cierre bidireccional:** cerrar un panel de herdr emite `agent.closed { reason:"pane_closed" }` y retira el agente de la app; olvidar/cerrar un agente desde la app (`agent.close`) manda `host.herdr_close` al `rp-host` de la máquina y sólo archiva cuando herdr confirma `ok:true`. Una pérdida de socket normal (red, caída del proceso) sigue marcando el agente como offline sin archivar nada, y un `agent.hello` posterior lo vuelve a hacer visible.
+- **Archivar en vez de borrar:** `agent.forget` ahora archiva (`archived_at`, migración `0005_agent_archive.sql`). Los agentes archivados salen de la lista, del mesh, de los contadores de máquina y de las notificaciones push, pero conservan eventos, snapshots, prompts y comunicaciones. La retención periódica no los toca.
+- **Historial archivado y purga explícita:** `agent.archived` / `GET /v1/agents/archived` lista los agentes archivados con un resumen para mostrar (incluye `messageCount`) y cursor `nextBefore`; `agent.purge` / `DELETE /v1/agents/{id}` es la única vía que destruye historial y exige un agente archivado y desconectado.
+- **Nuevos mensajes de protocolo (aditivos):** `agent.closed`, `agent.close`, `agent.archived`, `agent.archived.list`, `agent.purge`, `host.herdr_close`, `host.herdr_closed` y el código de error `agent_close_unsupported` (HTTP 409). Fixtures de contrato para todos ellos.
+
 ## [0.5.5] - 2026-10-21
 
 ### WebSocket Performance & Compression

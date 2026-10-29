@@ -145,6 +145,7 @@ El cuerpo de cada push se cifra con AES‑256‑GCM con una clave por dispositiv
   Restaurar: `systemctl stop rp-relay && rp-relay restore <archivo> && systemctl start rp-relay`.
 - **Actualizar:** `sudo npm i -g https://github.com/J3pf/Rp-relay/releases/download/v0.5.5/j3pf-rp-relay-0.5.5.tgz && sudo systemctl restart rp-relay`. El cierre ordenado avisa a todos los
   clientes con `1012` y reconectan de inmediato; las migraciones se aplican al arrancar.
+- **Entrega del release:** los canales de entrega son la imagen `ghcr.io/j3pf/rp-relay` y el GitHub Release. `@j3pf/rp-relay` y `@j3pf/rp-protocol` **no** se publican en npm todavía: el job `npm` del workflow queda detrás de la variable de repositorio `RP_PUBLISH_NPM=true` y el Release no depende de él. El workflow **no** empaqueta ni adjunta ningún tarball: si un release necesita el `.tgz` para `npm i -g`, hay que adjuntarlo aparte o añadir un paso de empaquetado (hueco conocido y aceptado, ver `odd/tasks/agent-lifecycle-sync.md`).
 - **Revocar:** `rp-relay devices revoke <id>` / `machines revoke <id>` (o desde la app). Cortan las conexiones al instante.
 - **Privacidad:** el relay nunca ejecuta nada en las PCs ni guarda credenciales de Pi. Los tokens sólo se guardan como SHA‑256.
 

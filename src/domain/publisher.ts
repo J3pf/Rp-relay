@@ -8,7 +8,7 @@ export class Publisher {
 	agent(agentId: string): void {
 		const { repos, hub, summaries } = this.c();
 		const row = repos.agents.get(agentId);
-		if (!row) return;
+		if (!row || row.archived_at !== null) return;
 		const m = repos.machines.get(row.machine_id);
 		if (m?.revoked_at) return;
 		const s = summaries.agent(row);

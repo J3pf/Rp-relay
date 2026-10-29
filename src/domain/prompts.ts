@@ -18,6 +18,8 @@ export class PromptService {
 	/** `prompt.open` del plugin (o reconciliación en `agent.hello`). */
 	onPluginOpen(agentId: string, p: PromptOpen): void {
 		const { repos, hub, summaries, publisher, dispatcher, mesh } = this.c();
+		// Un agente archivado ya no existe para la app: no se abre ni se notifica nada suyo.
+		if (repos.agents.get(agentId)?.archived_at != null) return;
 		const existing = repos.prompts.get(p.promptId);
 		if (existing) {
 			if (existing.agent_id !== agentId) return;
@@ -56,7 +58,12 @@ export class PromptService {
 		);
 		this.answerReqs.set(promptId, { conn: via.conn ?? null, reqId: via.reqId, deviceId });
 		const agentConn = hub.agents.get(row.agent_id);
-		if (!agentConn) return { ok: true, queued: true };
+		if (!agentConn) {
+			// La respuesta espera a que el agente vuelva, pero la notificación ya no hace falta en los
+			// demás dispositivos (evita notificaciones fantasma hasta la entrega diferida).
+			this.c().dispatcher.promptCancelled(promptId, deviceId);
+			return { ok: true, queued: true };
+		}
 		agentConn.send(envelope("prompt.answer", { promptId, answer, deviceId }));
 		return { ok: true, queued: false };
 	}

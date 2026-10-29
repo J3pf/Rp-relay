@@ -365,7 +365,11 @@ describe("agentes, apps y eventos", () => {
 		expect((await app.next("ack")).re).toBe(id);
 		const rm = await app.next((e) => e.t === "agents.update" && (e.d as any).remove?.includes(agent.agentId));
 		expect(rm).toBeTruthy();
-		expect(t.relay.ctx.repos.agents.get(agent.agentId)).toBeUndefined();
+		const archived = t.relay.ctx.repos.agents.get(agent.agentId);
+		expect(archived).toBeDefined();
+		expect(archived?.archived_at).toEqual(expect.any(Number));
+		expect(t.relay.ctx.repos.agents.list().some((row) => row.id === agent.agentId)).toBe(false);
+		expect(t.relay.ctx.repos.agents.byMachine(m.machineId).some((row) => row.id === agent.agentId)).toBe(false);
 		app.close();
 	});
 });

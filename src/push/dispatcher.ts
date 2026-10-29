@@ -65,6 +65,7 @@ export class PushDispatcher {
 	// ---- eventos de dominio ----
 	promptOpened(p: PromptRow): void {
 		const { summaries, repos } = this.c();
+		if (repos.agents.get(p.agent_id)?.archived_at != null) return;
 		const prompt = summaries.prompt(p);
 		const buttons = prompt.kind === "confirm" || (prompt.options?.length ?? 0) <= 3;
 		const body: PushPromptBody & { pushId?: string } = {
@@ -111,7 +112,7 @@ export class PushDispatcher {
 		const { repos, summaries } = this.c();
 		const a = repos.agents.get(agentId);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
-		if (!a || !m) return;
+		if (!a || a.archived_at !== null || !m) return;
 		void this.fanOut(
 			"settled",
 			agentId,
@@ -131,7 +132,7 @@ export class PushDispatcher {
 		const { repos, summaries } = this.c();
 		const a = repos.agents.get(agentId);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
-		if (!a || !m) return;
+		if (!a || a.archived_at !== null || !m) return;
 		void this.fanOut(
 			"error",
 			agentId,
@@ -151,7 +152,7 @@ export class PushDispatcher {
 		const { repos, summaries } = this.c();
 		const a = repos.agents.get(agentId);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
-		if (!a || !m) return;
+		if (!a || a.archived_at !== null || !m) return;
 		void this.fanOut(
 			"terminal_wait",
 			agentId,
@@ -288,7 +289,7 @@ export class PushDispatcher {
 		return res;
 	}
 
-	/** Al conectarse un canal directo: reenvía lo pendiente (los prompts ya resueltos se descartan). */
+	/** Al conectarse un canal directo: reenvía lo pendiente (los prompts ya resueltos y los agentes archivados se descartan). */
 	flushDirect(deviceId: string, send: (msg: ReturnType<typeof envelope>) => boolean): number {
 		const { repos } = this.c();
 		const now = Date.now();
@@ -297,6 +298,12 @@ export class PushDispatcher {
 			if (row.kind === "prompt" && row.ref_id) {
 				const p = repos.prompts.get(row.ref_id);
 				if (p?.state !== "open") {
+					repos.outbox.ack(row.push_id, deviceId, now);
+					continue;
+				}
+			} else if (row.ref_id) {
+				// settled / error / terminal_wait: el `ref_id` es el agentId, y un agente archivado ya no notifica.
+				if (repos.agents.get(row.ref_id)?.archived_at != null) {
 					repos.outbox.ack(row.push_id, deviceId, now);
 					continue;
 				}

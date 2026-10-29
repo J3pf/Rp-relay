@@ -2,6 +2,7 @@ import {
 	type AgentEvent,
 	type AgentHello,
 	type AgentSnapshot,
+	type ArchivedAgentSummary,
 	CommEvent,
 	envelope,
 	isDroppableEvent,
@@ -10,9 +11,20 @@ import {
 import { Value } from "@sinclair/typebox/value";
 import type { Ctx } from "../context.js";
 import type { CommRow } from "../db/repos/comms.js";
-import type { MachineRow } from "../db/repos/index.js";
+import type { AgentRow, MachineRow } from "../db/repos/index.js";
+import { RelayError } from "../util/errors.js";
 import type { AgentConn } from "../ws/conn.js";
 import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolution.js";
+
+function paneBinding(row: AgentRow): string | null {
+	if (!row.herdr) return null;
+	try {
+		const herdr = JSON.parse(row.herdr);
+		return typeof herdr?.paneId === "string" && herdr.paneId.trim().length > 0 ? herdr.paneId : null;
+	} catch {
+		return null;
+	}
+}
 
 export function previewOf(e: any): string | null {
 	const m = e?.message;
@@ -370,17 +382,82 @@ export class AgentService {
 		for (const id of ids) this.armGrace(id, config.limits.promptGraceSeconds * 1000);
 	}
 
-	forget(agentId: string): boolean {
-		const { repos, hub, publisher, messages, prompts, mesh } = this.c();
+	async close(agentId: string): Promise<void> {
+		const { repos, hosts } = this.c();
+		const agent = repos.agents.get(agentId);
+		if (!agent || agent.archived_at !== null) throw new RelayError("not_found", "agente desconocido");
+		const paneId = paneBinding(agent);
+		if (!paneId) throw new RelayError("agent_close_unsupported", "el agente no corre en un panel de herdr");
+		const machine = repos.machines.get(agent.machine_id);
+		if (!machine || machine.revoked_at) throw new RelayError("not_found", "PC desconocida");
+
+		const result = await hosts.request(machine.id, "host.herdr_close", { machineId: machine.id, paneId });
+		if (!result.ok) throw new RelayError(result.code as RelayError["code"], result.message);
+		if (result.d?.paneId !== paneId) throw new RelayError("internal", "respuesta del host no coincide con el panel");
+		if (result.d?.ok !== true) {
+			throw new RelayError(
+				"conflict",
+				`herdr no pudo cerrar el panel: ${result.d?.error ?? "error desconocido"}`,
+				"herdr_close_failed",
+			);
+		}
+		this.archive(agentId);
+	}
+
+	onClosed(conn: AgentConn, d: { reason: string }): void {
+		if (d.reason === "pane_closed" && conn.agentId) this.archive(conn.agentId);
+	}
+
+	listArchived(args: { machineId?: string | null; before?: number | null; limit?: number } = {}): {
+		agents: ArchivedAgentSummary[];
+		nextBefore: number | null;
+	} {
+		const { repos, summaries } = this.c();
+		const limit = args.limit ?? 50;
+		const rows = repos.agents.listArchived(limit, args.before, args.machineId);
+		return {
+			agents: summaries.archived(rows),
+			nextBefore: rows.length === limit ? rows[rows.length - 1]!.archived_at : null,
+		};
+	}
+
+	purge(agentId: string): void {
+		const { repos, hub, messages, mesh } = this.c();
+		const agent = repos.agents.get(agentId);
+		if (!agent) throw new RelayError("not_found", "agente desconocido");
+		if (hub.agents.has(agentId)) throw new RelayError("conflict", "no se puede purgar un agente conectado");
+		if (agent.archived_at === null) throw new RelayError("conflict", "solo se puede purgar un agente archivado");
+
+		this.clearGrace(agentId);
+		repos.agents.delete(agentId);
+		messages.forget(agentId);
+		mesh.invalidate();
+	}
+
+	archive(agentId: string): boolean {
+		const { repos, publisher, prompts, mesh } = this.c();
 		const a = repos.agents.get(agentId);
-		if (!a || hub.agents.has(agentId)) return false;
+		if (!a || !repos.agents.archive(agentId, Date.now())) return false;
 		this.clearGrace(agentId);
 		prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
-		repos.agents.delete(agentId);
 		mesh.invalidate();
-		messages.forget(agentId);
 		publisher.agentRemoved(agentId);
 		publisher.machine(a.machine_id);
+		return true;
+	}
+
+	forget(agentId: string): boolean {
+		const { repos, hub, messages } = this.c();
+		const a = repos.agents.get(agentId);
+		if (!a) return false;
+		if (hub.agents.has(agentId)) return false;
+		if (a.archived_at !== null) {
+			// Ya archivado: olvidarlo otra vez es un no-op idempotente, no un conflicto.
+			messages.forget(agentId);
+			return true;
+		}
+		if (!this.archive(agentId)) return false;
+		messages.forget(agentId);
 		return true;
 	}
 

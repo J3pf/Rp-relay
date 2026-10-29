@@ -41,6 +41,7 @@ function agent(id: string, overrides: Partial<AgentRow> = {}): AgentRow {
 		last_preview: `activity-${id}`,
 		first_seen_at: now,
 		last_seen_at: now,
+		archived_at: null,
 		...overrides,
 	};
 }

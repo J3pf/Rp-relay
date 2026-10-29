@@ -70,6 +70,7 @@ export type AgentEvent = Static<typeof AgentEvent>;
 
 export const AgentStatusMsg = Type.Object({ status: AgentStatus, detail: OptNullable(Type.String()) });
 export const AgentStatuses = Type.Object({ items: Type.Record(Type.String(), Nullable(Type.String())) });
+export const AgentClosed = Type.Object({ reason: Type.Literal("pane_closed") });
 
 // ---- Relay → Plugin (PROTOCOLO §5) ----
 
