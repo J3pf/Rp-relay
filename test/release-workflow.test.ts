@@ -131,4 +131,27 @@ describe("release workflow", () => {
 		expect(manifest.dependencies?.["@j3pf/rp-protocol"]).toBeDefined();
 		expect(manifest.bundledDependencies ?? []).toContain("@j3pf/rp-protocol");
 	});
+
+	it("publishes the curated release notes as the release body", () => {
+		// `docs/RELEASE-NOTES-<version>.md` is written for users; GitHub's own generated notes
+		// replace it with "What's Changed" commit noise, so the file never reaches the page.
+		const release = jobs().get("github-release");
+		expect(release).toBeDefined();
+		expect(release).toMatch(/body_path:\s*\$\{\{\s*steps\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z0-9_-]+\s*\}\}/);
+		expect(workflow).toContain("docs/RELEASE-NOTES-${GITHUB_REF_NAME#v}.md");
+	});
+
+	it("does not let GitHub generate the body over the curated notes", () => {
+		const release = jobs().get("github-release");
+		expect(release).toBeDefined();
+		expect(release).not.toMatch(/generate_release_notes:\s*true/);
+	});
+
+	it("fails before publishing anything when the curated notes are missing", () => {
+		// Failing in `github-release` would publish the image and only then die, leaving a half
+		// release; the gate belongs in `verify`, which runs before `docker`.
+		const verify = jobs().get("verify");
+		expect(verify).toBeDefined();
+		expect(verify).toMatch(/\[ -f [^\]]+\] \|\| \{[^}]*exit 1/);
+	});
 });

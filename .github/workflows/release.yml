@@ -26,6 +26,12 @@ jobs:
             v=$(node -p "require('./$p').version")
             [ "$v" = "$tag" ] || { echo "$p tiene versión $v, la etiqueta es $tag"; exit 1; }
           done
+      # Las notas curadas son la cara del release; sin ellas la página muestra ruido de commits.
+      # Se valida aquí y no en `github-release` para que un tag sin notas no publique ni la imagen.
+      - name: Las notas curadas del release existen
+        run: |
+          notes="docs/RELEASE-NOTES-${GITHUB_REF_NAME#v}.md"
+          [ -f "$notes" ] || { echo "falta $notes: el release publica docs/RELEASE-NOTES-<versión>.md"; exit 1; }
       - run: npm run lint
       - run: npm run build
       - run: npm run typecheck
@@ -105,7 +111,14 @@ jobs:
         run: |
           npm install -g --prefix "$RUNNER_TEMP/rp-install" ./j3pf-rp-relay-*.tgz
           "$RUNNER_TEMP/rp-install/bin/rp-relay" --version | grep -qx "${GITHUB_REF_NAME#v}"
+      # `with:` no ejecuta shell, así que la ruta de las notas se resuelve en un paso previo: el
+      # archivo es por etiqueta (`docs/RELEASE-NOTES-0.6.1.md`), no uno fijo.
+      - id: notes
+        name: Resuelve las notas curadas del release
+        run: echo "path=docs/RELEASE-NOTES-${GITHUB_REF_NAME#v}.md" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          # `body_path` y `generate_release_notes` son excluyentes en la práctica: dejar la segunda en
+          # `true` reemplazaba las notas curadas por «What's Changed…» y el archivo se ignoraba.
+          body_path: ${{ steps.notes.outputs.path }}
           files: j3pf-rp-relay-*.tgz
