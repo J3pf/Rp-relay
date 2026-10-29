@@ -5,6 +5,19 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.6.1] - 2026-10-29
+
+### Corregido: olvidar un agente con el panel de herdr ya cerrado
+
+- **Olvidar un agente cuyo panel de herdr ya no existe ahora termina bien.** Antes, `agent.close` recibía `pane_not_found` del host, lo trataba como un fallo de cierre y respondía `conflict` con `reason: "herdr_close_failed"`; la app mostraba **«No se pudo cerrar el agente»** y el agente quedaba imposible de olvidar, porque el host no puede cerrar un panel que ya no está. Un panel ausente ya satisface el cierre: el relay archiva el agente y responde `ack`, que es lo que hace converger a todos los clientes (el historial se conserva, como en cualquier archivo).
+- **Los fallos reales siguen siendo fallos:** cualquier otro error del host — incluido `herdr_unavailable` — mantiene `conflict` con `herdr_close_failed` y no archiva nada, para no convertir en fantasma un panel que podría seguir vivo. El código del host se compara de forma exacta, nunca una frase legible.
+- **Tres casos fijados en los tests:** archivar cuando herdr informa que el panel ya no existe (rojo antes de la corrección), seguir fallando cuando herdr se niega de verdad a cerrar, y seguir fallando con el host no disponible.
+
+### Entrega
+
+- `@j3pf/rp-relay` y `@j3pf/rp-protocol` pasan a **0.6.1**, en lockstep con el lockfile; `deploy/install.sh` también, en sus tres menciones, para que `--version latest` resuelva al tarball de este release.
+- Sin cambios en el contrato: los mensajes `agent.closed`, `agent.close`, `host.herdr_close` y `host.herdr_closed` son los mismos de 0.6.0, y esta versión es compatible con los clientes que ya los hablan.
+
 ## [0.6.0] - 2026-10-29
 
 ### Release sin npm (publicación diferida)
