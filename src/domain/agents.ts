@@ -395,11 +395,15 @@ export class AgentService {
 		if (!result.ok) throw new RelayError(result.code as RelayError["code"], result.message);
 		if (result.d?.paneId !== paneId) throw new RelayError("internal", "respuesta del host no coincide con el panel");
 		if (result.d?.ok !== true) {
-			throw new RelayError(
-				"conflict",
-				`herdr no pudo cerrar el panel: ${result.d?.error ?? "error desconocido"}`,
-				"herdr_close_failed",
-			);
+			const cause = result.d?.error ?? "error desconocido";
+			// El panel ya no existe: el estado que el cierre busca ya se cumple. Tratarlo como fallo
+			// deja al agente imposible de olvidar, porque el host no puede cerrar lo que ya no está.
+			// Se archiva igual para que todos los clientes converjan; el historial no se destruye.
+			if (cause === "pane_not_found") {
+				this.archive(agentId);
+				return;
+			}
+			throw new RelayError("conflict", `herdr no pudo cerrar el panel: ${cause}`, "herdr_close_failed");
 		}
 		this.archive(agentId);
 	}

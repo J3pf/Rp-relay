@@ -90,7 +90,35 @@ describe("agent lifecycle synchronization", () => {
 		for (const client of [host, app, fresh.client, agent.client]) client.close();
 	});
 
-	it("leaves the agent active when Herdr refuses to close the pane", async () => {
+	it("archives the agent when Herdr reports the pane no longer exists", async () => {
+		const device = await pairDevice(t);
+		const machine = await pairMachine(t);
+		const host = await connectHost(machine);
+		const { client: app } = await connectApp(t, device);
+		const agent = await connectAgent(t, machine, "sess-gone", { herdr: { paneId: "p3" } });
+
+		const reqId = app.send("agent.close", { agentId: agent.agentId });
+		const request = await host.next("host.herdr_close");
+		host.send("host.herdr_closed", { paneId: "p3", ok: false, error: "pane_not_found" }, { re: request.id });
+
+		// el panel ya no existe: el estado deseado se cumple, así que el cierre es un éxito
+		const ack = await app.next((env) => env.t === "ack" && env.re === reqId);
+		expect(ack.re).toBe(reqId);
+		const removed = await app.next(isAgentRemoval(agent.agentId));
+		expect((removed.d as any).remove).toContain(agent.agentId);
+		expect(t.relay.ctx.repos.agents.get(agent.agentId)?.archived_at).not.toBeNull();
+		expect(isActive(agent.agentId)).toBe(false);
+
+		// el historial sobrevive: archivado, no destruido
+		expect(t.relay.ctx.repos.agents.listArchived(10, null, null).map((row) => row.id)).toContain(agent.agentId);
+		// y todo cliente converge, no solo el que pidió el cierre
+		const fresh = await connectApp(t, device);
+		expect((fresh.welcome.d as any).agents.some((entry: any) => entry.agentId === agent.agentId)).toBe(false);
+
+		for (const client of [host, app, fresh.client, agent.client]) client.close();
+	});
+
+	it("still returns herdr_close_failed when Herdr genuinely refuses to close the pane", async () => {
 		const device = await pairDevice(t);
 		const machine = await pairMachine(t);
 		const host = await connectHost(machine);
@@ -99,16 +127,43 @@ describe("agent lifecycle synchronization", () => {
 
 		const reqId = app.send("agent.close", { agentId: agent.agentId });
 		const request = await host.next("host.herdr_close");
-		host.send("host.herdr_closed", { paneId: "p3", ok: false, error: "pane_not_found" }, { re: request.id });
+		host.send("host.herdr_closed", { paneId: "p3", ok: false, error: "herdr_close_failed" }, { re: request.id });
 
 		const error = await app.next((env) => env.t === "error" && env.re === reqId);
 		expect(error.d).toMatchObject({
 			code: "conflict",
-			message: "herdr no pudo cerrar el panel: pane_not_found",
+			message: "herdr no pudo cerrar el panel: herdr_close_failed",
 			reason: "herdr_close_failed",
 		});
 		expect(t.relay.ctx.repos.agents.get(agent.agentId)?.archived_at).toBeNull();
 		expect(isActive(agent.agentId)).toBe(true);
+		const fresh = await connectApp(t, device);
+		expect((fresh.welcome.d as any).agents.some((entry: any) => entry.agentId === agent.agentId)).toBe(true);
+
+		for (const client of [host, app, fresh.client, agent.client]) client.close();
+	});
+
+	it("still fails and keeps the agent when the host reports herdr_unavailable", async () => {
+		// Un panel que sí existe puede seguir vivo: archivar aquí sería crear agentes fantasma.
+		const device = await pairDevice(t);
+		const machine = await pairMachine(t);
+		const host = await connectHost(machine);
+		const { client: app } = await connectApp(t, device);
+		const agent = await connectAgent(t, machine, "sess-unavailable", { herdr: { paneId: "p3" } });
+
+		const reqId = app.send("agent.close", { agentId: agent.agentId });
+		const request = await host.next("host.herdr_close");
+		host.send("host.herdr_closed", { paneId: "p3", ok: false, error: "herdr_unavailable" }, { re: request.id });
+
+		const error = await app.next((env) => env.t === "error" && env.re === reqId);
+		expect(error.d).toMatchObject({
+			code: "conflict",
+			message: "herdr no pudo cerrar el panel: herdr_unavailable",
+			reason: "herdr_close_failed",
+		});
+		expect(t.relay.ctx.repos.agents.get(agent.agentId)?.archived_at).toBeNull();
+		expect(isActive(agent.agentId)).toBe(true);
+		expect(t.relay.ctx.repos.agents.listArchived(10, null, null).map((row) => row.id)).not.toContain(agent.agentId);
 		const fresh = await connectApp(t, device);
 		expect((fresh.welcome.d as any).agents.some((entry: any) => entry.agentId === agent.agentId)).toBe(true);
 
