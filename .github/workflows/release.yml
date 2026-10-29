@@ -32,6 +32,10 @@ jobs:
       - run: npm test
 
   npm:
+    # Publicación en npm DIFERIDA: no hay credenciales todavía. Sólo corre si se define
+    # la variable de repositorio RP_PUBLISH_NPM=true y el secreto NPM_TOKEN existe.
+    # El GitHub Release no depende de este job (ver test/release-workflow.test.ts).
+    if: ${{ vars.RP_PUBLISH_NPM == 'true' }}
     needs: verify
     runs-on: ubuntu-latest
     steps:
@@ -82,7 +86,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   github-release:
-    needs: [npm, docker]
+    # La entrega actual es la imagen de ghcr + este release: no espera a npm.
+    needs: docker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
