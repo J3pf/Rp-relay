@@ -15,6 +15,9 @@
     "docs",
     "README.md"
   ],
+  "bundledDependencies": [
+    "@j3pf/rp-protocol"
+  ],
   "engines": {
     "node": ">=22"
   },

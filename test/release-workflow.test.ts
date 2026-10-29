@@ -13,6 +13,10 @@ import { describe, expect, it } from "vitest";
  */
 
 const workflow = readFileSync(join(process.cwd(), ".github/workflows/release.yml"), "utf8");
+const manifest = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+	bundledDependencies?: string[];
+	dependencies?: Record<string, string>;
+};
 
 /** Splits the `jobs:` block into job name → body, keyed by two-space indentation. */
 function jobs(): Map<string, string> {
@@ -100,5 +104,31 @@ describe("release workflow", () => {
 			if (name === "npm") continue;
 			expect(body, `${name} must not reference the npm token`).not.toContain("NPM_TOKEN");
 		}
+	});
+
+	it("packs the installable tarball and attaches it to the release", () => {
+		const release = jobs().get("github-release");
+		expect(release).toBeDefined();
+		// `deploy/install.sh` runs `npm install -g <release tarball>`, so the release job must build and pack.
+		expect(release).toMatch(/^\s{6}-\s+run:\s*npm ci\s*$/m);
+		expect(release).toMatch(/^\s{6}-\s+run:\s*npm run build\s*$/m);
+		expect(release).toMatch(/^\s{6}-\s+run:\s*npm pack\s*$/m);
+		// and the artifact has to reach the release, not stay in the workspace
+		expect(release).toMatch(/files:\s*\S*\.tgz/);
+	});
+
+	it("installs the packed tarball and checks the version before releasing", () => {
+		// The artifact that is attached must be the artifact that was proven installable.
+		const release = jobs().get("github-release");
+		expect(release).toBeDefined();
+		expect(release).toMatch(/npm install -g --prefix/);
+		expect(release).toMatch(/rp-relay" --version|rp-relay --version/);
+		expect(release).toMatch(/GITHUB_REF_NAME#v/);
+	});
+
+	it("bundles the workspace protocol package so the tarball installs without the npm registry", () => {
+		// `@j3pf/rp-protocol` is not published; without bundling it, `npm install -g <tgz>` fails with E404.
+		expect(manifest.dependencies?.["@j3pf/rp-protocol"]).toBeDefined();
+		expect(manifest.bundledDependencies ?? []).toContain("@j3pf/rp-protocol");
 	});
 });
