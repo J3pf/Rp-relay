@@ -151,6 +151,11 @@ El cuerpo de cada push se cifra con AES‑256‑GCM con una clave por dispositiv
   variable de repositorio `RP_PUBLISH_NPM=true` (y de un secreto `NPM_TOKEN` que aún no existe) y el Release no depende de él.
   El propio workflow instala el tarball en un prefijo temporal y exige que `rp-relay --version` coincida con la etiqueta antes
   de adjuntarlo.
+- **Notas del release:** la página del Release publica las notas curadas del tag, `docs/RELEASE-NOTES-<versión>.md`
+  (por ejemplo `docs/RELEASE-NOTES-0.6.1.md`), entregadas con `body_path`. Ya no se usan las notas autogeneradas de
+  GitHub (`generate_release_notes`): reemplazaban ese archivo por el ruido de commits («What's Changed…»). `verify` falla
+  si el archivo no existe, de modo que un tag sin notas curadas no publica ni la imagen: las notas son parte del release,
+  no un adorno posterior.
 - **Revocar:** `rp-relay devices revoke <id>` / `machines revoke <id>` (o desde la app). Cortan las conexiones al instante.
 - **Privacidad:** el relay nunca ejecuta nada en las PCs ni guarda credenciales de Pi. Los tokens sólo se guardan como SHA‑256.
 
