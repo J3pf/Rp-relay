@@ -489,13 +489,14 @@ Mensaje **data-only**, `android.priority = "high"` para `prompt` y `"normal"` pa
 Cuerpo descifrado para `k=prompt`: `{ promptId, agentId, agentLabel, machineId, machineName, machineContext, kind, category, title, message (≤500 chars), options:[{id,label}] (≤3 para botones), allowFreeText, danger }`.
 `questionnaire` nunca lleva botones: la notificación abre la hoja de respuesta.
 Para `k=cancel`: `{ promptId }`. Para `k=settled`: `{ agentId, agentLabel, preview }`.
-Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el detalle por `GET /v1/prompts`.
+El cuerpo usa un presupuesto de 3000 B y las reglas de ajuste comunes descritas en §8.2; la app siempre puede pedir el detalle por `GET /v1/prompts`.
 
 ### 8.2 APNs (opcional)
 
 APNs usa HTTP/2 con el host elegido por dispositivo: `sandbox` → `api.development.push.apple.com`; `production` →
 `api.push.apple.com`. `apns-topic` es el bundle ID, `apns-collapse-id` es el `promptId` (o la referencia de la notificación),
-`apns-push-type` es `alert`; `apns-priority` es `10` para `prompt`/`test` y `5` para el resto.
+truncado determinísticamente como prefijo en un límite de punto de código para no superar 64 B UTF-8; `apns-push-type` es `alert`;
+`apns-priority` es `10` para `prompt`/`test` y `5` para el resto.
 
 La alerta es una plantilla genérica estática: no contiene el título ni el texto del prompt. El objeto APNs lleva el sobre
 cifrado en el nivel superior, junto a `aps` (no anidado dentro de `data`):
@@ -509,9 +510,12 @@ cifrado en el nivel superior, junto a `aps` (no anidado dentro de `data`):
 ```
 
 La Notification Service Extension (NSE) de la app debe descifrar `{v,k,n,c}` con la `pushKey` del dispositivo y el mismo
-AES-256-GCM/AAD `rp1` descrito en §8.1; el relay sólo transporta el sobre opaco. FCM conserva el límite de cuerpo de 3000 B;
-APNs ajusta el cuerpo a 2900 B para que el JSON final, incluido `aps` y la expansión base64, no supere los 4096 B de Apple.
-La NSE debe tolerar el mensaje truncado. El operador proporciona después el `.p8` privado y configura
+AES-256-GCM/AAD `rp1` descrito en §8.1; el relay sólo transporta el sobre opaco. `fitBody` conserva el orden de ajuste
+`message` → máximo tres `options` → `title` (hasta 120 caracteres); si aún supera el presupuesto, recorta cadenas en el orden
+`detail`, `preview`, `agentLabel`, `machineContext`, `machineName` y luego por clave ascendente. Como último recurso elimina
+campos opcionales en ese orden y después otros campos por clave ascendente. FCM conserva el presupuesto de cuerpo de 3000 B;
+APNs usa 2900 B para que el JSON final, incluido `aps` y la expansión base64, no supere los 4096 B de Apple. La NSE debe
+tolerar el mensaje truncado. El operador proporciona después el `.p8` privado y configura
 `RP_APNS_KEY_ID`, `RP_APNS_TEAM_ID`, `RP_APNS_KEY_FILE`, `RP_APNS_BUNDLE_ID` y opcionalmente `RP_APNS_ENV` (`production`
 por defecto). La clave `.p8` no se distribuye con el relay.
 

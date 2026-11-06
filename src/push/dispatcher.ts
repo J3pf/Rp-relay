@@ -4,7 +4,7 @@ import { ulid } from "ulid";
 import type { Ctx } from "../context.js";
 import type { DeviceRow, PromptRow } from "../db/repos/index.js";
 import { HOUR, MINUTE } from "../util/time.js";
-import { APNS_BAD_TOKEN, type ApnsSender, BAD_DEVICE_TOKEN } from "./apns.js";
+import { APNS_BAD_TOKEN, type ApnsSender, BAD_DEVICE_TOKEN, fitApnsCollapseId } from "./apns.js";
 import { encryptPush } from "./crypto.js";
 import { FCM_UNREGISTERED, type FcmSender } from "./fcm.js";
 import { parsePrefs, type QuietHours, shouldNotify } from "./prefs.js";
@@ -32,7 +32,11 @@ const TTL_OTHER = 10 * MINUTE;
 const MAX_BODY_BYTES = 3000;
 const APNS_MAX_BODY_BYTES = 2900;
 
-/** Recorta el cuerpo para respetar el límite FCM de 4 KB tras cifrar/base64 (PROTOCOLO §8.1). */
+/**
+ * Fits the serialized body to its channel budget. Preserve the legacy trim order (message, options, title), then
+ * clip remaining strings in fixed order (detail, preview, agentLabel, machineContext, machineName, then sorted keys);
+ * if structured fields still overflow, drop optional fields in that same fixed order before any remaining keys.
+ */
 export function fitBody<T extends Record<string, unknown>>(body: T, maxBytes = MAX_BODY_BYTES): T {
 	const out: Record<string, unknown> = { ...body };
 	const size = () => Buffer.byteLength(JSON.stringify(out));
@@ -44,6 +48,79 @@ export function fitBody<T extends Record<string, unknown>>(body: T, maxBytes = M
 	}
 	if (size() > maxBytes && Array.isArray(out.options)) out.options = (out.options as unknown[]).slice(0, 3);
 	if (size() > maxBytes && typeof out.title === "string") out.title = `${out.title.slice(0, 120)}…`;
+	if (size() <= maxBytes) return out as T;
+
+	const clone = (value: unknown): unknown => {
+		if (Array.isArray(value)) return value.map(clone);
+		if (value && typeof value === "object")
+			return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, clone(nested)]));
+		return value;
+	};
+	for (const key of Object.keys(out)) out[key] = clone(out[key]);
+
+	type StringRef = { get: () => string; set: (value: string) => void };
+	const collectStrings = (value: unknown, set: (next: unknown) => void, refs: StringRef[]): void => {
+		if (typeof value === "string") {
+			refs.push({ get: () => value, set: (next) => set(next) });
+		} else if (Array.isArray(value)) {
+			for (let index = 0; index < value.length; index++) {
+				collectStrings(value[index], (next) => (value[index] = next), refs);
+			}
+		} else if (value && typeof value === "object") {
+			for (const key of Object.keys(value).sort()) {
+				collectStrings(
+					(value as Record<string, unknown>)[key],
+					(next) => ((value as Record<string, unknown>)[key] = next),
+					refs,
+				);
+			}
+		}
+	};
+	const clipOrder = ["detail", "preview", "agentLabel", "machineContext", "machineName", ...Object.keys(out).sort()];
+	for (const key of new Set(clipOrder)) {
+		if (size() <= maxBytes) break;
+		const refs: StringRef[] = [];
+		collectStrings(out[key], (next) => (out[key] = next), refs);
+		for (const ref of refs) {
+			if (size() <= maxBytes) break;
+			const chars = Array.from(ref.get());
+			let low = 0;
+			let high = chars.length;
+			let best: string | undefined;
+			while (low <= high) {
+				const mid = Math.floor((low + high) / 2);
+				const candidate = `${chars.slice(0, mid).join("")}${mid < chars.length ? "…" : ""}`;
+				ref.set(candidate);
+				if (size() <= maxBytes) {
+					best = candidate;
+					low = mid + 1;
+				} else high = mid - 1;
+			}
+			ref.set(best ?? "");
+		}
+	}
+
+	if (size() > maxBytes) {
+		const optionalOrder = [
+			"detail",
+			"preview",
+			"agentLabel",
+			"machineContext",
+			"machineName",
+			"title",
+			"message",
+			"options",
+		];
+		const required = new Set(["promptId", "agentId", "pushId", "machineId", "kind", "category"]);
+		for (const key of new Set([...optionalOrder, ...Object.keys(out).sort()])) {
+			if (size() <= maxBytes) break;
+			if (!required.has(key)) delete out[key];
+		}
+		for (const key of Object.keys(out).sort()) {
+			if (size() <= maxBytes) break;
+			delete out[key];
+		}
+	}
 	return out as T;
 }
 
@@ -316,7 +393,7 @@ export class PushDispatcher {
 					payload: buildApnsPayload(d.push_key, kind, { ...body, pushId }),
 					headers: {
 						topic: apnsConfig?.bundleId ?? "",
-						collapseId: ref,
+						collapseId: fitApnsCollapseId(ref),
 						pushType: "alert",
 						priority: kind === "prompt" || kind === "test" ? 10 : 5,
 					},

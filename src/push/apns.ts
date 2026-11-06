@@ -50,6 +50,19 @@ export const APNS_BAD_TOKEN = "Unregistered";
 export const BAD_DEVICE_TOKEN = "BadDeviceToken";
 const APNS_TIMEOUT_MS = 10_000;
 
+/** Prefix-truncates at a Unicode code-point boundary, with an absolute 64-byte APNs header limit. */
+export function fitApnsCollapseId(value: string): string {
+	let result = "";
+	let bytes = 0;
+	for (const char of value) {
+		const charBytes = Buffer.byteLength(char, "utf8");
+		if (bytes + charBytes > 64) break;
+		result += char;
+		bytes += charBytes;
+	}
+	return result;
+}
+
 export class ApnsError extends Error {
 	constructor(
 		readonly code: string,
@@ -106,7 +119,7 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 				authorization: `bearer ${token}`,
 				"content-type": "application/json",
 				"apns-topic": msg.headers.topic,
-				"apns-collapse-id": msg.headers.collapseId,
+				"apns-collapse-id": fitApnsCollapseId(msg.headers.collapseId),
 				"apns-push-type": msg.headers.pushType,
 				"apns-priority": String(msg.headers.priority),
 			});

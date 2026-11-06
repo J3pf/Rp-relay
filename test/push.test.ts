@@ -318,6 +318,59 @@ describe("canal FCM", () => {
 });
 
 describe("canal APNs", () => {
+	it("settled, error y terminal_wait limitan apns-collapse-id a 64 bytes", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const m = await pairMachine(t);
+		const longAgentId = `${m.machineId}:${"a".repeat(70 - m.machineId.length - 1)}`;
+		const agent = await connectAgent(t, m, "long-collapse", { agentId: longAgentId });
+		agent.event({ type: "message_end", message: { role: "assistant", content: "Terminado" } });
+		agent.event({ type: "agent_settled", aborted: false });
+		agent.client.send("agent.status", { status: "error", detail: "fallo" });
+		agent.event({ type: "terminal_wait", kind: "custom", title: "Esperando", active: true });
+		await sleep(250);
+
+		for (const kind of ["settled", "error", "terminal_wait"] as const) {
+			const msg = t.apns!.sent.find((x) => x.payload.k === kind)!;
+			expect(msg).toBeDefined();
+			expect(Buffer.byteLength(msg.headers.collapseId)).toBeLessThanOrEqual(64);
+			expect(msg.headers.collapseId).toBe(longAgentId.slice(0, 64));
+		}
+		agent.client.close();
+	});
+
+	it("error con detail largo cabe en 4096 B", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "long-apns-error-detail");
+		agent.client.send("agent.status", { status: "error", detail: "x".repeat(6000) });
+		await sleep(200);
+
+		const apns = t.apns!.sent.find((x) => x.payload.k === "error")!;
+		expect(Buffer.byteLength(JSON.stringify(apns.payload))).toBeLessThanOrEqual(4096);
+		const apnsBodyJson = decryptPush(dev.pushKey, { n: apns.payload.n as string, c: apns.payload.c as string });
+		expect(Buffer.byteLength(apnsBodyJson)).toBeLessThanOrEqual(2900);
+		expect(JSON.parse(apnsBodyJson).detail.length).toBeLessThan(6000);
+		agent.client.close();
+	});
+
+	it("error con detail largo respeta el presupuesto FCM de 3000 B", async () => {
+		const dev = await pairDevice(t);
+		await enableFcm(dev);
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "long-fcm-error-detail");
+		agent.client.send("agent.status", { status: "error", detail: "x".repeat(6000) });
+		await sleep(200);
+
+		const fcm = t.fcm.sent.find((x) => x.data.k === "error")!;
+		const fcmBodyJson = decryptPush(dev.pushKey, { n: fcm.data.n!, c: fcm.data.c! });
+		expect(Buffer.byteLength(fcmBodyJson)).toBeLessThanOrEqual(3000);
+		expect(JSON.parse(fcmBodyJson).detail.length).toBeLessThan(6000);
+		expect(Buffer.byteLength(JSON.stringify(fcm.data))).toBeLessThanOrEqual(4096);
+		agent.client.close();
+	});
+
 	it("prompt con mensaje de 9000 bytes se entrega bajo 4096 B y conserva el sobre descifrable", async () => {
 		const dev = await pairDevice(t);
 		await enableApns(dev);
