@@ -24,7 +24,14 @@ opaque `(k,n,c)` AES-256-GCM envelope; Apple never sees prompt text in clear.
 - T2 (S3-S7, S9): `src/push/apns.ts` (interface + real sender factory behind env config) + FakeApns in test/helpers.ts + dispatcher injection + payload builder + environment routing + cleanup + push-test result + docs (PROTOCOLO/ARQUITECTURA/CHANGELOG). Tests in `test/push.test.ts` new suite.
 - Verification: gentle-ai-verify with Risk item 3 (API/schema contract) + Risk item 2 (push payload crypto), after T2.
 
+## Tasks (added after independent verify mw5b6hel-e-wbi0)
+
+- T3 (S10 fix, O1): APNs payload budget FAILED the 4 KB Apple limit with the shared 3000 B cap (probe: 4177 B). Give the APNs path its own budget so the FINAL JSON payload is <= 4096 B (fitBody order preserved); keep the FCM cap unchanged; pin with a regression test built from a 9000-byte message asserting Buffer.byteLength(JSON.stringify(msg.payload)) <= 4096.
+- T4 (S6/S7/O3): tests for the exact 410 `Unregistered` and 400 `BadDeviceToken` cleanup mappings (both columns null), a configured-but-failing push-test returning apns="failed" + ok:false, and registration symmetry: apnsToken + no apnsEnvironment clears apns_env (Apple tokens are per-environment; iOS always sends its environment), apnsToken:null clears both columns. Decide + tests first co-generic with setPush semantics (undefined=keep, null=clear).
+
 ## Log
 
 - L1 (orchestrator, 2026-11-06): GO for relay slice; no push, no deploy to 192.168.18.138, no merge; tests use a FAKE sender ("no real .p8 exists, the user will supply it later"); ADR 0002 stays the contract.
 - L2 (explorer mw58ir8c-9-mxzp, 2026-11-06): full map with file:line evidence recorded above in the map message (devices 0001_init.sql:5-9; setPush devices.ts:50-56; dispatcher fanOut 241-257, FCM send 259-275, clearFcm; re-push domain/prompts.ts:157-164; crypto.ts:12-19; PushChannelReq packages/protocol/src/http.ts:30-33; route devices.ts:23-32; tests FakeFcm helpers.ts:14-21 + push.test.ts/contract.test.ts/migration-000x.test.ts; docs lines PROTOCOLO.md:346/475-495).
+
+- L3 (verify mw5b6hel-e-wbi0, 2026-11-06): overall PASS; O1 HIGH (APNs payload 4177 B > 4096 B limit with the shared 3000 B body cap), O2 medium (real-sender mapping untested; provider JWT refreshed every send - TooManyProviderTokenUpdates risk), O3 low (stale env when re-registering without apnsEnvironment; schema accepts platform:"android" while docs say "ios"), O4 low (collapseId for non-prompt kinds = agentId, untested; 64 B Apple limit not measured). Suggested regression tests recorded above as T3/T4 scope.
