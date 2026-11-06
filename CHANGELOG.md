@@ -9,6 +9,8 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ### Añadido: canal APNs cifrado para iOS
 - Envío opcional de notificaciones por HTTP/2 APNs con sobre AES-256-GCM opaco, prioridad/collapse-id y limpieza de tokens inválidos.
+- Limita el JSON APNs completo a 4096 B con un presupuesto de cuerpo específico; FCM conserva su límite de 3000 B.
+- La nueva asignación de token APNs sin entorno borra el entorno anterior y `apnsToken:null` limpia ambos campos.
 - Configuración por `RP_APNS_*`; el operador debe proporcionar su clave privada `.p8` (no se incluye en el relay).
 
 ## [0.6.1] - 2026-10-29

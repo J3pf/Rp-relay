@@ -56,7 +56,7 @@ export class DevicesRepo {
 		fcmToken: string | null | undefined,
 		direct: boolean,
 		apnsToken?: string | null,
-		apnsEnvironment?: "sandbox" | "production",
+		apnsEnvironment?: "sandbox" | "production" | null,
 	): void {
 		const fields = ["direct_enabled=?"];
 		const values: (string | number | null)[] = [direct ? 1 : 0];
@@ -64,15 +64,15 @@ export class DevicesRepo {
 			fields.push("fcm_token=?");
 			values.push(fcmToken);
 		}
-		if (apnsToken !== undefined) {
-			fields.push("apns_token=?");
-			values.push(apnsToken);
-		}
-		if (apnsEnvironment !== undefined) {
+		if (apnsToken !== undefined && apnsToken !== null) {
+			fields.push("apns_token=?", "apns_env=?");
+			values.push(apnsToken, apnsEnvironment ?? null);
+		} else if (apnsToken === undefined && apnsEnvironment !== undefined) {
 			fields.push("apns_env=?");
 			values.push(apnsEnvironment);
 		}
 		stmt(this.db, `UPDATE devices SET ${fields.join(", ")} WHERE id=?`).run(...values, id);
+		if (apnsToken === null) this.clearApns(id);
 	}
 	clearFcm(id: string): void {
 		stmt(this.db, "UPDATE devices SET fcm_token=NULL WHERE id=?").run(id);

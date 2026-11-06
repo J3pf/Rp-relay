@@ -30,6 +30,7 @@ export interface PushResult {
 const TTL_PROMPT = HOUR;
 const TTL_OTHER = 10 * MINUTE;
 const MAX_BODY_BYTES = 3000;
+const APNS_MAX_BODY_BYTES = 2900;
 
 /** Recorta el cuerpo para respetar el límite FCM de 4 KB tras cifrar/base64 (PROTOCOLO §8.1). */
 export function fitBody<T extends Record<string, unknown>>(body: T, maxBytes = MAX_BODY_BYTES): T {
@@ -44,6 +45,19 @@ export function fitBody<T extends Record<string, unknown>>(body: T, maxBytes = M
 	if (size() > maxBytes && Array.isArray(out.options)) out.options = (out.options as unknown[]).slice(0, 3);
 	if (size() > maxBytes && typeof out.title === "string") out.title = `${out.title.slice(0, 120)}…`;
 	return out as T;
+}
+
+export function buildApnsPayload(pushKey: Buffer, kind: PushKindName, body: Record<string, unknown>) {
+	const enc = encryptPush(pushKey, fitBody(body, APNS_MAX_BODY_BYTES));
+	return {
+		aps: {
+			"mutable-content": 1,
+			alert: { title: "RemotePi", body: "Tienes una notificación pendiente" },
+		},
+		v: "1",
+		k: kind,
+		...enc,
+	};
 }
 
 export class PushDispatcher {
@@ -294,22 +308,12 @@ export class PushDispatcher {
 
 		if (this.apns && d.apns_token) {
 			try {
-				const enc = encryptPush(d.push_key, full);
 				const apnsConfig = this.c().config.apns;
 				const environment = d.apns_env ?? apnsConfig?.env ?? "production";
 				await this.apns.send({
 					host: environment === "sandbox" ? "api.development.push.apple.com" : "api.push.apple.com",
 					token: d.apns_token,
-					payload: {
-						aps: {
-							"mutable-content": 1,
-							alert: { title: "RemotePi", body: "Tienes una notificación pendiente" },
-						},
-						v: "1",
-						k: kind,
-						n: enc.n,
-						c: enc.c,
-					},
+					payload: buildApnsPayload(d.push_key, kind, { ...body, pushId }),
 					headers: {
 						topic: apnsConfig?.bundleId ?? "",
 						collapseId: ref,

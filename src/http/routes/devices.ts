@@ -29,7 +29,9 @@ export function registerDevices(app: FastifyInstance, c: () => Ctx, auth: HttpAu
 			apnsToken?: string | null;
 			apnsEnvironment?: "sandbox" | "production";
 		};
-		c().repos.devices.setPush(req.device!.id, b.fcmToken, b.direct, b.apnsToken, b.apnsEnvironment);
+		const apnsToken = b.apnsToken === "" ? null : b.apnsToken;
+		const apnsEnvironment: "sandbox" | "production" | null | undefined = apnsToken === null ? null : b.apnsEnvironment;
+		c().repos.devices.setPush(req.device!.id, b.fcmToken, b.direct, apnsToken, apnsEnvironment);
 		return { ok: true };
 	});
 

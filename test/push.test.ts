@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { ApnsError, BAD_DEVICE_TOKEN } from "../src/push/apns.js";
 import { decryptPush, encryptPush } from "../src/push/crypto.js";
-import { fitBody } from "../src/push/dispatcher.js";
+import { buildApnsPayload, fitBody } from "../src/push/dispatcher.js";
 import { FcmError } from "../src/push/fcm.js";
 import { inQuietHours, shouldNotify } from "../src/push/prefs.js";
 import {
@@ -50,6 +50,16 @@ describe("cifrado de push", () => {
 		const body = fitBody({ title: "t", message: "x".repeat(10_000), options: [1, 2, 3, 4, 5] }, 1000);
 		expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(1000);
 		expect((body.message as string).endsWith("…")).toBe(true);
+	});
+	it("el sobre APNs de un cuerpo de prompt de 9000 bytes cabe en el límite JSON de Apple", () => {
+		const key = Buffer.alloc(32, 7);
+		const payload = buildApnsPayload(key, "prompt", { promptId: "P1", message: "x".repeat(9000) });
+
+		expect(Buffer.byteLength(JSON.stringify(payload))).toBeLessThanOrEqual(4096);
+		expect(Object.keys(payload).sort()).toEqual(["aps", "c", "k", "n", "v"]);
+		const body = JSON.parse(decryptPush(key, { n: payload.n, c: payload.c })) as { promptId: string; message: string };
+		expect(body.promptId).toBe("P1");
+		expect(body.message.endsWith("…")).toBe(true);
 	});
 });
 
@@ -308,6 +318,31 @@ describe("canal FCM", () => {
 });
 
 describe("canal APNs", () => {
+	it("prompt con mensaje de 9000 bytes se entrega bajo 4096 B y conserva el sobre descifrable", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "apns-large-message");
+		const p = promptBody(agent.agentId, {
+			message: "x".repeat(9000),
+			options: [
+				{ id: "0", label: "a".repeat(1100) },
+				{ id: "1", label: "b".repeat(1100) },
+			],
+		});
+		agent.client.send("prompt.open", p);
+		await sleep(150);
+
+		const msg = t.apns!.sent.find((x) => x.payload.k === "prompt")!;
+		expect(Buffer.byteLength(JSON.stringify(msg.payload))).toBeLessThanOrEqual(4096);
+		expect(Object.keys(msg.payload).sort()).toEqual(["aps", "c", "k", "n", "v"]);
+		const body = JSON.parse(decryptPush(dev.pushKey, { n: msg.payload.n as string, c: msg.payload.c as string }));
+		expect(body).toMatchObject({ promptId: p.promptId, options: p.options });
+		expect(body.message.length).toBeLessThan(500);
+		expect(body.message.endsWith("…")).toBe(true);
+		agent.client.close();
+	});
+
 	it("prompt → sobre cifrado opaco con alerta genérica, NSE mutable, collapse-id y prioridad alta", async () => {
 		const dev = await pairDevice(t);
 		await enableApns(dev);
@@ -384,6 +419,21 @@ describe("canal APNs", () => {
 		agent.client.close();
 	});
 
+	it.each([
+		["Unregistered", 410],
+		["BadDeviceToken", 400],
+	] as const)("el código APNs %s limpia token y entorno", async (code, status) => {
+		const dev = await pairDevice(t);
+		await enableApns(dev, `token-${code}`, "sandbox");
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, `cleanup-${code}`);
+		t.apns!.fail = new ApnsError(code, status, code);
+		agent.client.send("prompt.open", promptBody(agent.agentId));
+		await sleep(150);
+		expect(t.relay.ctx.repos.devices.get(dev.deviceId)).toMatchObject({ apns_token: null, apns_env: null });
+		agent.client.close();
+	});
+
 	it("BAD_DEVICE_TOKEN borra token y entorno; un 5xx conserva el registro", async () => {
 		const dev = await pairDevice(t);
 		await enableApns(dev);
@@ -413,6 +463,17 @@ describe("canal APNs", () => {
 		expect(r.json).toMatchObject({ ok: true, results: [{ deviceId: dev.deviceId, apns: "sent" }] });
 		expect(t.apns!.sent.at(-1)!.payload.k).toBe("test");
 		expect(t.apns!.sent.at(-1)!.headers.priority).toBe(10);
+	});
+
+	it("push-test APNs configurado pero fallido devuelve apns=failed y ok=false", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		t.apns!.fail = new ApnsError("InternalServerError", 500, "boom");
+
+		const r = await api(t, "POST", "/v1/devices/me/push-test", dev.deviceToken);
+		expect(r.status).toBe(200);
+		expect(r.json).toMatchObject({ ok: false, results: [{ deviceId: dev.deviceId, apns: "failed" }] });
+		expect(t.apns!.sent).toHaveLength(0);
 	});
 
 	it("sin sender APNs configurado devuelve apns=off", async () => {

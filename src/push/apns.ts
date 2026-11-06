@@ -41,6 +41,7 @@ export class ApnsError extends Error {
 	}
 }
 
+// TODO: Cache and refresh provider JWTs to avoid APNs TooManyProviderTokenUpdates under high send volume.
 function providerToken(config: ApnsConfig, privateKey: string): string {
 	const encode = (value: string | Buffer) => Buffer.from(value).toString("base64url");
 	const input = `${encode(JSON.stringify({ alg: "ES256", kid: config.keyId }))}.${encode(

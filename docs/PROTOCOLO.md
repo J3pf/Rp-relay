@@ -509,8 +509,9 @@ cifrado en el nivel superior, junto a `aps` (no anidado dentro de `data`):
 ```
 
 La Notification Service Extension (NSE) de la app debe descifrar `{v,k,n,c}` con la `pushKey` del dispositivo y el mismo
-AES-256-GCM/AAD `rp1` descrito en §8.1; el relay sólo transporta el sobre opaco. El cuerpo conserva el límite de 3000 B
-de `fitBody`; la NSE debe tolerar el mensaje truncado. El operador proporciona después el `.p8` privado y configura
+AES-256-GCM/AAD `rp1` descrito en §8.1; el relay sólo transporta el sobre opaco. FCM conserva el límite de cuerpo de 3000 B;
+APNs ajusta el cuerpo a 2900 B para que el JSON final, incluido `aps` y la expansión base64, no supere los 4096 B de Apple.
+La NSE debe tolerar el mensaje truncado. El operador proporciona después el `.p8` privado y configura
 `RP_APNS_KEY_ID`, `RP_APNS_TEAM_ID`, `RP_APNS_KEY_FILE`, `RP_APNS_BUNDLE_ID` y opcionalmente `RP_APNS_ENV` (`production`
 por defecto). La clave `.p8` no se distribuye con el relay.
 
