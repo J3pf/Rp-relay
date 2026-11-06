@@ -40,7 +40,7 @@ Todo pasando por un **Relay propio** instalable en **Ubuntu Server**.
 │  Kotlin + Compose    │        https://relay/v1/...         │   Relay (rp-relay)         │
 │                      │◄──────────────────────────────────►│   Node 22 + TypeScript     │
 └─────────▲────────────┘                                     │   Fastify + ws + SQLite    │
-          │  FCM (push, payload cifrado)                      │   Ubuntu 22.04 / 24.04     │
+          │  FCM + APNs (push, payload cifrado)               │   Ubuntu 22.04 / 24.04     │
           │                                                   │                            │
    ┌──────┴───────┐   HTTP v1 API (firebase-admin)            │                            │
    │ Google FCM   │◄──────────────────────────────────────────┤                            │
@@ -59,7 +59,7 @@ Todo pasando por un **Relay propio** instalable en **Ubuntu Server**.
 
 | Componente | Repo | Qué es | Stack decidido |
 |---|---|---|---|
-| **Relay** | `rp-relay` | Servidor central: autenticación, enrutamiento en tiempo real, historial, cola de preguntas/autorizaciones, envío de push, almacén temporal de adjuntos. | Node.js 22 LTS, TypeScript, Fastify 5, `ws`, SQLite (`better-sqlite3`), `firebase-admin`, systemd o Docker + Caddy (TLS). |
+| **Relay** | `rp-relay` | Servidor central: autenticación, enrutamiento en tiempo real, historial, cola de preguntas/autorizaciones, envío de push, almacén temporal de adjuntos. | Node.js 22 LTS, TypeScript, Fastify 5, `ws`, SQLite (`better-sqlite3`), `firebase-admin`, APNs HTTP/2 + JWT ES256, systemd o Docker + Caddy (TLS). |
 | **Plugin** | `rp-plugin` | *Pi package* (extensión TypeScript) que se carga dentro de cada proceso `pi`. Conecta el agente al relay, transmite eventos, inyecta mensajes, y reenvía diálogos/autorizaciones al móvil. Incluye `rp-host` (fase 3). | TypeScript, cargado por Pi con `jiti`; dependencias: `ws`, `typebox` (provista por Pi). |
 | **App** | `rp-app` | Cliente Android nativo. | Kotlin 2.x, Jetpack Compose + Material 3, OkHttp (WS/HTTP), kotlinx.serialization, Room, DataStore, Hilt, FCM, CameraX + ML Kit (QR). |
 
@@ -71,7 +71,7 @@ Todo pasando por un **Relay propio** instalable en **Ubuntu Server**.
 | D2 | **Conexiones salientes** desde plugin y app hacia el relay (WebSocket sobre TLS). | Que el relay se conecte a las máquinas. | No hay que abrir puertos en las máquinas de desarrollo; funciona detrás de NAT. |
 | D3 | **Relay en TypeScript** (mismo lenguaje que el plugin). | Rust (Remote Pi), Go. | Comparte los esquemas del protocolo (TypeBox) con el plugin → validación idéntica en ambos lados, menos incertidumbre. La carga (1 usuario, decenas de agentes) es trivial para Node. |
 | D4 | **SQLite** como única base de datos. | Postgres, Redis. | Un solo usuario, un solo servidor. Cero operación; backup = copiar un archivo. |
-| D5 | **Push por dos canales: canal directo propio (servicio en primer plano `remoteMessaging` con WebSocket al relay) por defecto + FCM opcional** (payload cifrado AES‑256‑GCM); deduplicación por `promptId`. | Sólo FCM; UnifiedPush/ntfy. | Requisito de independencia total: funciona sin Google. FCM, si se configura, añade robustez y ahorro de batería. |
+| D5 | **Push por tres canales: canal directo propio (servicio en primer plano `remoteMessaging` con WebSocket al relay) por defecto + FCM y APNs opcionales** (payload cifrado AES‑256‑GCM); deduplicación por `promptId`. | Sólo FCM; UnifiedPush/ntfy. | Requisito de independencia de proveedores: funciona sin Google; FCM/APNs, si se configuran, añaden entrega en segundo plano. Ambos reciben sólo el sobre cifrado. |
 | D6 | **Responder desde la notificación** con botones de acción (Permitir / Denegar / opciones) y *RemoteInput* (respuesta de texto), enviados por HTTPS directo al relay. | Obligar a abrir la app. | Requisito principal del usuario. |
 | D7 | **"Primera respuesta gana"**: una pregunta se puede responder en la terminal **o** en el móvil; la que llegue primero resuelve y la otra se cancela automáticamente. | Bloquear la terminal mientras el móvil decide. | Los diálogos de Pi aceptan `AbortSignal` (verificado en código), así que se puede cancelar el diálogo de la terminal cuando responde el móvil, y viceversa. |
 | D8 | **TLS sí, cifrado extremo a extremo no (v1)**. | E2E tipo Happy. | El relay es del propio usuario. E2E añade gestión de claves compleja sin beneficio real en este modelo de amenazas. Se deja el protocolo preparado (campo `enc`) para fase futura. |
@@ -115,7 +115,7 @@ Verificados leyendo el código fuente de Pi 1.2.0 (`packages/coding-agent`):
 pi (tool_call bash "rm -rf build")
   └─ rp-plugin permission gate → ctx.ui.select("⚠ ¿Permitir?", [Permitir, Permitir siempre (sesión), Denegar])
         ├─ (A) diálogo normal en la terminal  (con AbortSignal)
-        └─ (B) prompt.open ──ws──► relay ── guarda prompt (state=open) ──► FCM (data, prioridad alta, cifrado)
+        └─ (B) prompt.open ──ws──► relay ── guarda prompt (state=open) ──► FCM/APNs (sobre cifrado, prioridad alta)
                                          └─ ws ──► apps conectadas
 Teléfono: notificación heads-up con botones [Permitir] [Denegar] [Abrir]
   └─ toca "Permitir" → POST /v1/prompts/{id}/answer (token del dispositivo)
@@ -123,9 +123,9 @@ Teléfono: notificación heads-up con botones [Permitir] [Denegar] [Abrir]
         relay ──ws──► plugin: prompt.answer
               plugin: aborta el diálogo de terminal (A) y resuelve la promesa con "Permitir"
               plugin ──► prompt.ack
-        relay ──FCM "cancel" + ws──► todos los dispositivos: retirar notificación
+        relay ──FCM/APNs "cancel" + ws──► todos los dispositivos: retirar notificación
 ```
-Si se responde en la terminal primero: plugin envía `prompt.resolved {by:"local"}` → relay marca resuelto → FCM "cancel" retira la notificación del teléfono.
+Si se responde en la terminal primero: plugin envía `prompt.resolved {by:"local"}` → relay marca resuelto → FCM/APNs "cancel" retira la notificación del teléfono.
 
 ### 5.2 Mensaje del móvil al agente (con adjuntos)
 

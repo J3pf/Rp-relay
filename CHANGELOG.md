@@ -5,6 +5,12 @@ Todas las novedades y cambios notables de este proyecto se documentan en este ar
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
+## [Unreleased]
+
+### Añadido: canal APNs cifrado para iOS
+- Envío opcional de notificaciones por HTTP/2 APNs con sobre AES-256-GCM opaco, prioridad/collapse-id y limpieza de tokens inválidos.
+- Configuración por `RP_APNS_*`; el operador debe proporcionar su clave privada `.p8` (no se incluye en el relay).
+
 ## [0.6.1] - 2026-10-29
 
 ### Corregido: olvidar un agente con el panel de herdr ya cerrado

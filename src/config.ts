@@ -31,6 +31,15 @@ export const ConfigSchema = Type.Object({
 	logLevel: Type.String({ default: "info" }),
 	trustProxy: Type.Optional(Type.Boolean()),
 	fcm: Type.Optional(Type.Object({ serviceAccountFile: Type.String() })),
+	apns: Type.Optional(
+		Type.Object({
+			keyId: Type.String(),
+			teamId: Type.String(),
+			keyFile: Type.String(),
+			bundleId: Type.String(),
+			env: Type.Union([Type.Literal("sandbox"), Type.Literal("production")], { default: "production" }),
+		}),
+	),
 	tls: Type.Optional(
 		Type.Union([
 			Type.Object({ cert: Type.String(), key: Type.String() }),
@@ -69,6 +78,13 @@ function applyEnv(raw: Json, env: NodeJS.ProcessEnv): Json {
 	else if (env.RP_LOG_LEVEL) c.logLevel = env.RP_LOG_LEVEL;
 	if (env.RP_TRUST_PROXY) c.trustProxy = env.RP_TRUST_PROXY === "true" || env.RP_TRUST_PROXY === "1";
 	if (env.RP_FCM_SERVICE_ACCOUNT_FILE) c.fcm = { serviceAccountFile: env.RP_FCM_SERVICE_ACCOUNT_FILE };
+	const apns = { ...(c.apns ?? {}) };
+	if (env.RP_APNS_KEY_ID) apns.keyId = env.RP_APNS_KEY_ID;
+	if (env.RP_APNS_TEAM_ID) apns.teamId = env.RP_APNS_TEAM_ID;
+	if (env.RP_APNS_KEY_FILE) apns.keyFile = env.RP_APNS_KEY_FILE;
+	if (env.RP_APNS_BUNDLE_ID || env.RP_APNS_TOPIC) apns.bundleId = env.RP_APNS_BUNDLE_ID ?? env.RP_APNS_TOPIC!;
+	if (env.RP_APNS_ENV) apns.env = env.RP_APNS_ENV;
+	if (Object.keys(apns).length > 0) c.apns = apns;
 	if (env.RP_TLS_CERT && env.RP_TLS_KEY) c.tls = { cert: env.RP_TLS_CERT, key: env.RP_TLS_KEY };
 	if (env.RP_ACME_DOMAIN && env.RP_ACME_EMAIL)
 		c.tls = { acme: { domain: env.RP_ACME_DOMAIN, email: env.RP_ACME_EMAIL } };

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { type Envelope, newMessageId, PROTOCOL_VERSION } from "@j3pf/rp-protocol";
 import { WebSocket } from "ws";
 import { type Config, parseConfig } from "../src/config.js";
+import type { ApnsMessage, ApnsSender } from "../src/push/apns.js";
 import type { FcmMessage, FcmSender } from "../src/push/fcm.js";
 import { Relay } from "../src/relay.js";
 import { createLogger } from "../src/util/log.js";
@@ -17,11 +18,21 @@ export class FakeFcm implements FcmSender {
 	}
 }
 
+export class FakeApns implements ApnsSender {
+	sent: ApnsMessage[] = [];
+	fail: Error | null = null;
+	async send(msg: ApnsMessage): Promise<void> {
+		if (this.fail) throw this.fail;
+		this.sent.push(msg);
+	}
+}
+
 export interface TestRelay {
 	relay: Relay;
 	dir: string;
 	config: Config;
 	fcm: FakeFcm;
+	apns: FakeApns | null;
 	http: string;
 	ws: string;
 	stop(): Promise<void>;
@@ -30,10 +41,11 @@ export interface TestRelay {
 
 export async function startRelay(
 	over: Record<string, any> = {},
-	opts: { dir?: string; fcm?: FakeFcm | null } = {},
+	opts: { dir?: string; fcm?: FakeFcm | null; apns?: FakeApns | null } = {},
 ): Promise<TestRelay> {
 	const dir = opts.dir ?? mkdtempSync(join(tmpdir(), "rp-relay-test-"));
 	const fcm = opts.fcm === undefined ? new FakeFcm() : opts.fcm;
+	const apns = opts.apns === undefined ? new FakeApns() : opts.apns;
 	const config = parseConfig(
 		{
 			dataDir: dir,
@@ -52,13 +64,20 @@ export async function startRelay(
 		},
 		{},
 	);
-	const relay = await Relay.create({ config, log: createLogger("silent"), fcmSender: fcm, noTimers: true });
+	const relay = await Relay.create({
+		config,
+		log: createLogger("silent"),
+		fcmSender: fcm,
+		apnsSender: apns,
+		noTimers: true,
+	});
 	await relay.start();
 	const t: TestRelay = {
 		relay,
 		dir,
 		config,
 		fcm: fcm ?? new FakeFcm(),
+		apns,
 		http: relay.baseUrl,
 		ws: relay.wsUrl,
 		async stop() {
@@ -66,7 +85,7 @@ export async function startRelay(
 		},
 		async restart() {
 			await relay.stop();
-			return startRelay(over, { dir, fcm });
+			return startRelay(over, { dir, fcm, apns });
 		},
 	};
 	return t;

@@ -4,6 +4,7 @@ import { ulid } from "ulid";
 import type { Ctx } from "../context.js";
 import type { DeviceRow, PromptRow } from "../db/repos/index.js";
 import { HOUR, MINUTE } from "../util/time.js";
+import { APNS_BAD_TOKEN, type ApnsSender, BAD_DEVICE_TOKEN } from "./apns.js";
 import { encryptPush } from "./crypto.js";
 import { FCM_UNREGISTERED, type FcmSender } from "./fcm.js";
 import { parsePrefs, type QuietHours, shouldNotify } from "./prefs.js";
@@ -22,6 +23,7 @@ export interface PushResult {
 	deviceId: string;
 	direct: "sent" | "queued" | "off";
 	fcm: "sent" | "failed" | "off";
+	apns: "sent" | "failed" | "off";
 	error?: string;
 }
 
@@ -46,13 +48,16 @@ export function fitBody<T extends Record<string, unknown>>(body: T, maxBytes = M
 
 export class PushDispatcher {
 	private fcm: FcmSender | null;
+	private apns: ApnsSender | null;
 
 	constructor(
 		private c: () => Ctx,
 		private log: Logger,
 		fcm: FcmSender | null = null,
+		apns: ApnsSender | null = null,
 	) {
 		this.fcm = fcm;
+		this.apns = apns;
 	}
 
 	setFcm(sender: FcmSender | null): void {
@@ -248,7 +253,7 @@ export class PushDispatcher {
 		const { repos, hub } = this.c();
 		const pushId = ulid();
 		const full = fitBody({ ...body, pushId });
-		const res: PushResult = { deviceId: d.id, direct: "off", fcm: "off" };
+		const res: PushResult = { deviceId: d.id, direct: "off", fcm: "off", apns: "off" };
 		const ttl = kind === "prompt" ? TTL_PROMPT : TTL_OTHER;
 
 		if (d.direct_enabled) {
@@ -284,6 +289,43 @@ export class PushDispatcher {
 					repos.devices.clearFcm(d.id);
 					this.log.info({ deviceId: d.id }, "token FCM no registrado: eliminado");
 				} else this.log.warn({ deviceId: d.id, code: err.code }, "fallo al enviar FCM");
+			}
+		}
+
+		if (this.apns && d.apns_token) {
+			try {
+				const enc = encryptPush(d.push_key, full);
+				const apnsConfig = this.c().config.apns;
+				const environment = d.apns_env ?? apnsConfig?.env ?? "production";
+				await this.apns.send({
+					host: environment === "sandbox" ? "api.development.push.apple.com" : "api.push.apple.com",
+					token: d.apns_token,
+					payload: {
+						aps: {
+							"mutable-content": 1,
+							alert: { title: "RemotePi", body: "Tienes una notificación pendiente" },
+						},
+						v: "1",
+						k: kind,
+						n: enc.n,
+						c: enc.c,
+					},
+					headers: {
+						topic: apnsConfig?.bundleId ?? "",
+						collapseId: ref,
+						pushType: "alert",
+						priority: kind === "prompt" || kind === "test" ? 10 : 5,
+					},
+				});
+				res.apns = "sent";
+			} catch (e) {
+				res.apns = "failed";
+				const err = e as { code?: string; status?: number; message?: string };
+				res.error ??= err.message;
+				if (err.code === APNS_BAD_TOKEN || err.code === BAD_DEVICE_TOKEN || err.status === 410) {
+					repos.devices.clearApns(d.id);
+					this.log.info({ deviceId: d.id, status: err.status }, "token APNs no registrado: eliminado");
+				} else this.log.warn({ deviceId: d.id, code: err.code }, "fallo al enviar APNs");
 			}
 		}
 		return res;

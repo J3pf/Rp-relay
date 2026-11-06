@@ -343,7 +343,7 @@ Semántica de topología, persistencia y conversación:
 | `POST` | `/v1/pair/device` | código | `{ code, name, fcmToken? }` → `{ deviceId, deviceToken, pushKey (base64 32 B), relayName }` |
 | `POST` | `/v1/pair/machine` | código | `{ code, hostname, name?, context? }` → `{ machineId, machineToken }` |
 | `POST` | `/v1/pair/codes` | device | crear código para emparejar una máquina desde la app → `{ code, expiresAt }` |
-| `PUT` | `/v1/devices/me/push` | device | `{ fcmToken?: string|null, direct: boolean }` — canales de push activos del dispositivo (FCM opcional; `direct` = servicio en primer plano con WS) |
+| `PUT` | `/v1/devices/me/push` | device | `{ fcmToken?: string|null, platform?: "ios", apnsToken?: string|null, apnsEnvironment?: "sandbox"|"production", direct: boolean }` — canales de push activos del dispositivo (FCM/APNs opcionales; `direct` = servicio en primer plano con WS) |
 | `POST` | `/v1/devices/me/push-test` | device | envía una notificación de prueba a este dispositivo |
 | `GET` | `/v1/devices` / `DELETE /v1/devices/{id}` | device | listar / revocar |
 | `GET` | `/v1/machines` / `DELETE /v1/machines/{id}` | device | listar / revocar |
@@ -473,7 +473,7 @@ Los cuerpos de estas rutas son JSON y corresponden a los esquemas TypeBox `MeshS
 ## 8. Push
 
 Canales: **directo** (WS `mode=direct`, mensaje `push.notify { k, body }` con el mismo cuerpo descifrado que abajo, sin
-cifrado adicional porque ya va por TLS a tu relay; la app responde `push.ack {pushId}`) y **FCM** (opcional, abajo).
+cifrado adicional porque ya va por TLS a tu relay; la app responde `push.ack {pushId}`), **FCM** y **APNs** (opcionales, abajo).
 El relay envía por todos los canales activos; la app deduplica por `promptId`/`pushId`.
 
 ### 8.1 FCM (opcional)
@@ -490,6 +490,29 @@ Cuerpo descifrado para `k=prompt`: `{ promptId, agentId, agentLabel, machineId, 
 `questionnaire` nunca lleva botones: la notificación abre la hoja de respuesta.
 Para `k=cancel`: `{ promptId }`. Para `k=settled`: `{ agentId, agentLabel, preview }`.
 Si el cuerpo supera 3 KB se recorta `message`; la app siempre puede pedir el detalle por `GET /v1/prompts`.
+
+### 8.2 APNs (opcional)
+
+APNs usa HTTP/2 con el host elegido por dispositivo: `sandbox` → `api.development.push.apple.com`; `production` →
+`api.push.apple.com`. `apns-topic` es el bundle ID, `apns-collapse-id` es el `promptId` (o la referencia de la notificación),
+`apns-push-type` es `alert`; `apns-priority` es `10` para `prompt`/`test` y `5` para el resto.
+
+La alerta es una plantilla genérica estática: no contiene el título ni el texto del prompt. El objeto APNs lleva el sobre
+cifrado en el nivel superior, junto a `aps` (no anidado dentro de `data`):
+
+```jsonc
+{
+  "aps": { "mutable-content": 1, "alert": { "title": "RemotePi", "body": "Tienes una notificación pendiente" } },
+  "v": "1", "k": "prompt", "n": "<base64 nonce 12B>",
+  "c": "<base64 AES-256-GCM(JSON ajustado, key=pushKey, aad='rp1')>"
+}
+```
+
+La Notification Service Extension (NSE) de la app debe descifrar `{v,k,n,c}` con la `pushKey` del dispositivo y el mismo
+AES-256-GCM/AAD `rp1` descrito en §8.1; el relay sólo transporta el sobre opaco. El cuerpo conserva el límite de 3000 B
+de `fitBody`; la NSE debe tolerar el mensaje truncado. El operador proporciona después el `.p8` privado y configura
+`RP_APNS_KEY_ID`, `RP_APNS_TEAM_ID`, `RP_APNS_KEY_FILE`, `RP_APNS_BUNDLE_ID` y opcionalmente `RP_APNS_ENV` (`production`
+por defecto). La clave `.p8` no se distribuye con el relay.
 
 ## 9. rp-host (fase 3) — `wss://<relay>/ws/host`, auth `machineToken`
 

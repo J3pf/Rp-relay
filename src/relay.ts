@@ -24,6 +24,7 @@ import { PromptService } from "./domain/prompts.js";
 import { Publisher } from "./domain/publisher.js";
 import { Summaries } from "./domain/summaries.js";
 import { buildHttp } from "./http/server.js";
+import { type ApnsSender, createApnsSender } from "./push/apns.js";
 import { PushDispatcher } from "./push/dispatcher.js";
 import { createFirebaseSender, type FcmSender } from "./push/fcm.js";
 import { runRetention } from "./retention.js";
@@ -40,6 +41,8 @@ export interface RelayOptions {
 	log?: Logger;
 	/** Sustituye el envío FCM real (tests). */
 	fcmSender?: FcmSender | null;
+	/** Sustituye el envío APNs real (tests). */
+	apnsSender?: ApnsSender | null;
 	/** No arrancar temporizadores periódicos (tests deterministas). */
 	noTimers?: boolean;
 }
@@ -107,6 +110,15 @@ export class Relay {
 				log.error({ err: (e as Error).message }, "FCM no disponible; se continúa sólo con el canal directo");
 			}
 		}
+		let apns: ApnsSender | null = null;
+		if (opts.apnsSender !== undefined) apns = opts.apnsSender;
+		else if (config.apns) {
+			try {
+				apns = createApnsSender(config.apns);
+			} catch (e) {
+				log.error({ err: (e as Error).message }, "APNs no disponible; se continúa sólo con los canales disponibles");
+			}
+		}
 		Object.assign(ctx, {
 			config,
 			log,
@@ -123,7 +135,7 @@ export class Relay {
 			history: new HistoryService(get),
 			hosts: new HostService(get),
 			entities: new EntityService(get),
-			dispatcher: new PushDispatcher(get, log, fcm),
+			dispatcher: new PushDispatcher(get, log, fcm, apns),
 			blobs: new BlobStore(blobsDir(config), repos, config.limits),
 		} satisfies Ctx);
 		return new Relay(config, log, db, ctx, opts);

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parseConfig } from "../src/config.js";
+import { ApnsError, BAD_DEVICE_TOKEN } from "../src/push/apns.js";
 import { decryptPush, encryptPush } from "../src/push/crypto.js";
 import { fitBody } from "../src/push/dispatcher.js";
 import { FcmError } from "../src/push/fcm.js";
@@ -102,9 +104,19 @@ describe("preferencias de notificación", () => {
 	});
 });
 
+const APNS_TEST_CONFIG = {
+	apns: {
+		keyId: "test-key-id",
+		teamId: "test-team-id",
+		keyFile: "/not-read-by-fake-apns.p8",
+		bundleId: "com.example.rp",
+		env: "production",
+	},
+};
+
 let t: TestRelay;
 beforeEach(async () => {
-	t = await startRelay();
+	t = await startRelay(APNS_TEST_CONFIG);
 });
 afterEach(async () => {
 	await t.stop();
@@ -113,6 +125,20 @@ afterEach(async () => {
 
 async function enableFcm(dev: { deviceToken: string }, token = "fcm-token-1", direct = false) {
 	const r = await api(t, "PUT", "/v1/devices/me/push", dev.deviceToken, { fcmToken: token, direct });
+	expect(r.status).toBe(200);
+}
+
+async function enableApns(
+	dev: { deviceToken: string },
+	token = "apns-token-1",
+	environment: "sandbox" | "production" = "production",
+	direct = false,
+) {
+	const r = await api(t, "PUT", "/v1/devices/me/push", dev.deviceToken, {
+		apnsToken: token,
+		apnsEnvironment: environment,
+		direct,
+	});
 	expect(r.status).toBe(200);
 }
 
@@ -278,6 +304,146 @@ describe("canal FCM", () => {
 		expect((await direct.next("push.notify")).d).toMatchObject({ k: "prompt" });
 		agent.client.close();
 		direct.close();
+	});
+});
+
+describe("canal APNs", () => {
+	it("prompt → sobre cifrado opaco con alerta genérica, NSE mutable, collapse-id y prioridad alta", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const m = await pairMachine(t, "devbox", { name: "PC Empresa", context: "work" });
+		const agent = await connectAgent(t, m, "apns-prompt");
+		const p = promptBody(agent.agentId);
+		agent.client.send("prompt.open", p);
+		await sleep(150);
+
+		const msg = t.apns!.sent.find((x) => x.payload.k === "prompt")!;
+		expect(msg.token).toBe("apns-token-1");
+		expect(msg.host).toBe("api.push.apple.com");
+		expect(Object.keys(msg.payload).sort()).toEqual(["aps", "c", "k", "n", "v"]);
+		expect(msg.payload).toMatchObject({ v: "1", k: "prompt", n: expect.any(String), c: expect.any(String) });
+		const aps = msg.payload.aps as { [key: string]: unknown; alert: { title: string; body: string } };
+		expect(aps["mutable-content"]).toBe(1);
+		expect(aps.alert.title).not.toContain(p.title);
+		expect(aps.alert.body).not.toContain(p.title);
+		expect(msg.headers).toEqual({
+			topic: "com.example.rp",
+			collapseId: p.promptId,
+			pushType: "alert",
+			priority: 10,
+		});
+		const body = JSON.parse(decryptPush(dev.pushKey, { n: msg.payload.n as string, c: msg.payload.c as string }));
+		expect(body).toMatchObject({ promptId: p.promptId, title: p.title, message: p.message, agentId: agent.agentId });
+		agent.client.close();
+	});
+
+	it("cancel, settled, error y terminal_wait usan el mismo sobre cifrado y prioridad 5", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "apns-events");
+		const p = promptBody(agent.agentId);
+		agent.client.send("prompt.open", p);
+		await sleep(100);
+		agent.client.send("prompt.resolved", { promptId: p.promptId, by: "local" });
+		agent.event({ type: "message_end", message: { role: "assistant", content: "Todo listo" } });
+		agent.event({ type: "agent_settled", aborted: false });
+		agent.client.send("agent.status", { status: "error", detail: "rate limit" });
+		agent.event({ type: "terminal_wait", kind: "custom", title: "Elige tema", active: true });
+		agent.event({ type: "terminal_wait", kind: "custom", title: "Elige tema", active: false });
+		await sleep(300);
+
+		const kinds = ["cancel", "settled", "error", "terminal_wait"];
+		for (const kind of kinds) {
+			const messages = t.apns!.sent.filter((x) => x.payload.k === kind);
+			expect(messages).toHaveLength(1);
+			const msg = messages[0]!;
+			expect(msg.headers.priority).toBe(5);
+			expect(Object.keys(msg.payload).sort()).toEqual(["aps", "c", "k", "n", "v"]);
+			expect(msg.payload).toMatchObject({ v: "1", k: kind, n: expect.any(String), c: expect.any(String) });
+			expect(
+				JSON.parse(decryptPush(dev.pushKey, { n: msg.payload.n as string, c: msg.payload.c as string })),
+			).toBeTypeOf("object");
+		}
+		agent.client.close();
+	});
+
+	it("dirige sandbox y production a sus hosts APNs respectivos", async () => {
+		const sandbox = await pairDevice(t, "iPhone Sandbox");
+		const production = await pairDevice(t, "iPhone Production");
+		await enableApns(sandbox, "sandbox-token", "sandbox");
+		await enableApns(production, "production-token", "production");
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "apns-hosts");
+		agent.client.send("prompt.open", promptBody(agent.agentId));
+		await sleep(150);
+
+		expect(t.apns!.sent).toHaveLength(2);
+		expect(t.apns!.sent.find((x) => x.token === "sandbox-token")?.host).toBe("api.development.push.apple.com");
+		expect(t.apns!.sent.find((x) => x.token === "production-token")?.host).toBe("api.push.apple.com");
+		agent.client.close();
+	});
+
+	it("BAD_DEVICE_TOKEN borra token y entorno; un 5xx conserva el registro", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "apns-cleanup");
+		t.apns!.fail = new ApnsError(BAD_DEVICE_TOKEN, 410, "Unregistered");
+		agent.client.send("prompt.open", promptBody(agent.agentId));
+		await sleep(150);
+		expect(t.relay.ctx.repos.devices.get(dev.deviceId)).toMatchObject({ apns_token: null, apns_env: null });
+
+		await enableApns(dev);
+		t.apns!.fail = new ApnsError("InternalServerError", 500, "boom");
+		agent.client.send("prompt.open", promptBody(agent.agentId));
+		await sleep(150);
+		expect(t.relay.ctx.repos.devices.get(dev.deviceId)).toMatchObject({
+			apns_token: "apns-token-1",
+			apns_env: "production",
+		});
+		agent.client.close();
+	});
+
+	it("push-test informa APNs enviado y considera exitoso el canal APNs", async () => {
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const r = await api(t, "POST", "/v1/devices/me/push-test", dev.deviceToken);
+		expect(r.status).toBe(200);
+		expect(r.json).toMatchObject({ ok: true, results: [{ deviceId: dev.deviceId, apns: "sent" }] });
+		expect(t.apns!.sent.at(-1)!.payload.k).toBe("test");
+		expect(t.apns!.sent.at(-1)!.headers.priority).toBe(10);
+	});
+
+	it("sin sender APNs configurado devuelve apns=off", async () => {
+		await t.stop();
+		cleanup(t);
+		t = await startRelay({}, { apns: null });
+		const dev = await pairDevice(t);
+		await enableApns(dev);
+		const r = await api(t, "POST", "/v1/devices/me/push-test", dev.deviceToken);
+		expect(r.status).toBe(200);
+		expect(r.json.results[0]).toMatchObject({ deviceId: dev.deviceId, apns: "off" });
+	});
+
+	it("RP_APNS_* configura la autenticación y el topic por entorno", () => {
+		const config = parseConfig(
+			{},
+			{
+				RP_APNS_KEY_ID: "env-key-id",
+				RP_APNS_TEAM_ID: "env-team-id",
+				RP_APNS_KEY_FILE: "/keys/apns.p8",
+				RP_APNS_BUNDLE_ID: "com.example.env",
+				RP_APNS_ENV: "sandbox",
+			},
+		);
+		expect(config.apns).toEqual({
+			keyId: "env-key-id",
+			teamId: "env-team-id",
+			keyFile: "/keys/apns.p8",
+			bundleId: "com.example.env",
+			env: "sandbox",
+		});
 	});
 });
 

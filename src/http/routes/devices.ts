@@ -35,7 +35,7 @@ export function registerDevices(app: FastifyInstance, c: () => Ctx, auth: HttpAu
 
 	app.post("/v1/devices/me/push-test", { preHandler: auth.device }, async (req) => {
 		const results = await c().dispatcher.test(req.device!.id);
-		return { ok: results.some((r) => r.direct !== "off" || r.fcm === "sent"), results };
+		return { ok: results.some((r) => r.direct !== "off" || r.fcm === "sent" || r.apns === "sent"), results };
 	});
 
 	app.put("/v1/devices/me/prefs", { schema: { body: NotifyPrefs }, preHandler: auth.device }, async (req) => {
