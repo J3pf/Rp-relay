@@ -12,14 +12,82 @@ import {
 	validateMessage,
 	validateSchema,
 } from "@j3pf/rp-protocol";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/db/index.js";
 import { migrate } from "../src/db/migrate.js";
 import type { CommInput } from "../src/db/repos/comms.js";
 import { Repos } from "../src/db/repos/index.js";
+import { api, cleanup, pairDevice, startRelay, type TestRelay } from "./helpers.js";
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "protocol", "fixtures");
 const files = readdirSync(dir).filter((f) => /\.(valid|invalid)\.json$/.test(f));
+
+describe("contrato: registro push de dispositivos", () => {
+	let t: TestRelay;
+
+	beforeEach(async () => {
+		t = await startRelay();
+	});
+
+	afterEach(async () => {
+		await t.stop();
+		cleanup(t);
+	});
+
+	it("sigue aceptando el cuerpo Android legado", async () => {
+		const device = await pairDevice(t);
+		const response = await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
+			fcmToken: "android-fcm-token",
+			direct: false,
+		});
+
+		expect(response.status).toBe(200);
+		const listed = await api(t, "GET", "/v1/devices", device.deviceToken);
+		expect(listed.status).toBe(200);
+		expect(listed.json.devices[0]).toMatchObject({ direct: false, fcm: true, apns: false });
+	});
+
+	it("acepta y presenta un registro APNs de iOS", async () => {
+		const device = await pairDevice(t);
+		const response = await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
+			platform: "ios",
+			apnsToken: "apns-device-token",
+			apnsEnvironment: "sandbox",
+			direct: true,
+		});
+
+		expect(response.status).toBe(200);
+		const listed = await api(t, "GET", "/v1/devices", device.deviceToken);
+		expect(listed.status).toBe(200);
+		expect(listed.json.devices[0]).toMatchObject({ apns: true, apnsEnvironment: "sandbox" });
+	});
+
+	it("rechaza un entorno APNs desconocido sin cambiar los dispositivos", async () => {
+		const device = await pairDevice(t);
+		const before = await api(t, "GET", "/v1/devices", device.deviceToken);
+		const response = await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
+			platform: "ios",
+			apnsEnvironment: "bogus",
+			direct: true,
+		});
+		const after = await api(t, "GET", "/v1/devices", device.deviceToken);
+
+		expect(response.status).toBe(400);
+		expect(after.status).toBe(200);
+		expect(after.json).toEqual(before.json);
+	});
+
+	it("rechaza un registro push sin direct sin cambiar los dispositivos", async () => {
+		const device = await pairDevice(t);
+		const before = await api(t, "GET", "/v1/devices", device.deviceToken);
+		const response = await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, { fcmToken: "android-fcm-token" });
+		const after = await api(t, "GET", "/v1/devices", device.deviceToken);
+
+		expect(response.status).toBe(400);
+		expect(after.status).toBe(200);
+		expect(after.json).toEqual(before.json);
+	});
+});
 
 describe("contrato: fixtures", () => {
 	it("hay fixtures", () => expect(files.length).toBeGreaterThan(50));

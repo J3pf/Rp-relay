@@ -30,6 +30,9 @@ export const PairCodeRes = Type.Object({ code: Type.String(), expiresAt: Type.Nu
 export const PushChannelReq = Type.Object({
 	fcmToken: Type.Optional(Nullable(Type.String())),
 	direct: Type.Boolean(),
+	platform: Type.Optional(Type.Union([Type.Literal("android"), Type.Literal("ios")])),
+	apnsToken: Type.Optional(Nullable(Type.String())),
+	apnsEnvironment: Type.Optional(Type.Union([Type.Literal("sandbox"), Type.Literal("production")])),
 });
 export const QuietHours = Type.Object({
 	from: Type.String({ pattern: "^\\d{2}:\\d{2}$" }),

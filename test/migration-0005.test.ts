@@ -83,7 +83,7 @@ describe("migration 0005_agent_archive", () => {
 			]),
 		);
 
-		expect(migrate(db, { dir: MIGRATIONS_DIR })).toEqual([5]);
+		expect(migrate(db, { dir: MIGRATIONS_DIR })).toEqual([5, 6]);
 		expect(migrate(db, { dir: MIGRATIONS_DIR })).toEqual([]);
 
 		const rowAfter = db.prepare("SELECT * FROM agents WHERE id='m-1:a-1'").get() as Record<string, unknown>;

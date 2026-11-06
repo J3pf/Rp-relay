@@ -6,6 +6,8 @@ export interface DeviceRow {
 	token_hash: Buffer;
 	push_key: Buffer;
 	fcm_token: string | null;
+	apns_token: string | null;
+	apns_env: "sandbox" | "production" | null;
 	direct_enabled: number;
 	notify_prefs: string;
 	created_at: number;
@@ -49,12 +51,34 @@ export class DevicesRepo {
 	revoke(id: string, now: number): boolean {
 		return stmt(this.db, "UPDATE devices SET revoked_at=? WHERE id=? AND revoked_at IS NULL").run(now, id).changes > 0;
 	}
-	setPush(id: string, fcmToken: string | null | undefined, direct: boolean): void {
-		if (fcmToken === undefined) stmt(this.db, "UPDATE devices SET direct_enabled=? WHERE id=?").run(direct ? 1 : 0, id);
-		else stmt(this.db, "UPDATE devices SET fcm_token=?, direct_enabled=? WHERE id=?").run(fcmToken, direct ? 1 : 0, id);
+	setPush(
+		id: string,
+		fcmToken: string | null | undefined,
+		direct: boolean,
+		apnsToken?: string | null,
+		apnsEnvironment?: "sandbox" | "production",
+	): void {
+		const fields = ["direct_enabled=?"];
+		const values: (string | number | null)[] = [direct ? 1 : 0];
+		if (fcmToken !== undefined) {
+			fields.push("fcm_token=?");
+			values.push(fcmToken);
+		}
+		if (apnsToken !== undefined) {
+			fields.push("apns_token=?");
+			values.push(apnsToken);
+		}
+		if (apnsEnvironment !== undefined) {
+			fields.push("apns_env=?");
+			values.push(apnsEnvironment);
+		}
+		stmt(this.db, `UPDATE devices SET ${fields.join(", ")} WHERE id=?`).run(...values, id);
 	}
 	clearFcm(id: string): void {
 		stmt(this.db, "UPDATE devices SET fcm_token=NULL WHERE id=?").run(id);
+	}
+	clearApns(id: string): void {
+		stmt(this.db, "UPDATE devices SET apns_token=NULL, apns_env=NULL WHERE id=?").run(id);
 	}
 	setPrefs(id: string, prefs: unknown): void {
 		stmt(this.db, "UPDATE devices SET notify_prefs=? WHERE id=?").run(JSON.stringify(prefs), id);

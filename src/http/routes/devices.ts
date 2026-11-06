@@ -16,13 +16,20 @@ const present = (d: DeviceRow, me: string, live: boolean) => ({
 	current: d.id === me,
 	direct: d.direct_enabled === 1,
 	fcm: d.fcm_token !== null,
+	apns: d.apns_token !== null,
+	...(d.apns_env !== null ? { apnsEnvironment: d.apns_env } : {}),
 	connected: live,
 });
 
 export function registerDevices(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
 	app.put("/v1/devices/me/push", { schema: { body: PushChannelReq }, preHandler: auth.device }, async (req) => {
-		const b = req.body as { fcmToken?: string | null; direct: boolean };
-		c().repos.devices.setPush(req.device!.id, b.fcmToken, b.direct);
+		const b = req.body as {
+			fcmToken?: string | null;
+			direct: boolean;
+			apnsToken?: string | null;
+			apnsEnvironment?: "sandbox" | "production";
+		};
+		c().repos.devices.setPush(req.device!.id, b.fcmToken, b.direct, b.apnsToken, b.apnsEnvironment);
 		return { ok: true };
 	});
 
