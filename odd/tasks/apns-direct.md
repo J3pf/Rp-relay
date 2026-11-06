@@ -28,6 +28,15 @@ opaque `(k,n,c)` AES-256-GCM envelope; Apple never sees prompt text in clear.
 
 - T3 (S10 fix, O1): APNs payload budget FAILED the 4 KB Apple limit with the shared 3000 B cap (probe: 4177 B). Give the APNs path its own budget so the FINAL JSON payload is <= 4096 B (fitBody order preserved); keep the FCM cap unchanged; pin with a regression test built from a 9000-byte message asserting Buffer.byteLength(JSON.stringify(msg.payload)) <= 4096.
 - T4 (S6/S7/O3): tests for the exact 410 `Unregistered` and 400 `BadDeviceToken` cleanup mappings (both columns null), a configured-but-failing push-test returning apns="failed" + ok:false, and registration symmetry: apnsToken + no apnsEnvironment clears apns_env (Apple tokens are per-environment; iOS always sends its environment), apnsToken:null clears both columns. Decide + tests first co-generic with setPush semantics (undefined=keep, null=clear).
+- T5 (verify O2, both halves):
+  Scope A - provider-token cache in src/push/apns.ts:
+  - Cache the signed ES256 provider token in the real sender factory: reuse the SAME JWT for ~40 minutes (inside Apple's "not more than once per 20 min" refresh contract, before the 60-min expiry); regenerate lazily when older than 40 min or when invalidated by a 403 ExpiredProviderToken response (then ONE regeneration + ONE retry of the same send; a second failure surfaces as ApnsError; no infinite loop).
+  - Injectable clock (default Date.now) driving the threshold.
+  - The .p8 is read only at factory creation, never logged.
+
+  Scope B - real-sender mapping pinned WITHOUT network:
+  - Add a minimal HTTP/2-client seam to createApnsSender (options/client-factory parameter) so tests can inject a fake client returning raw status/reason pairs.
+  - RED tests in NEW test/apns.test.ts: (1) first send signs a JWT and issues an HTTP/2 request with headers apns-topic/collapse-id/push-type/priority; (2) two sends <40 min apart reuse the SAME provider token (captured by the fake); (3) a send after simulated 50 min signs a NEW token; (4) 403 ExpiredProviderToken → exactly one retry within the same send, one new token signed, send succeeds; (5) 410 → Unregistered mapping; (6) 400 reason BadDeviceToken → BadDeviceToken; (7) other 5xx → generic reject.
 
 ## Log
 
@@ -35,3 +44,12 @@ opaque `(k,n,c)` AES-256-GCM envelope; Apple never sees prompt text in clear.
 - L2 (explorer mw58ir8c-9-mxzp, 2026-11-06): full map with file:line evidence recorded above in the map message (devices 0001_init.sql:5-9; setPush devices.ts:50-56; dispatcher fanOut 241-257, FCM send 259-275, clearFcm; re-push domain/prompts.ts:157-164; crypto.ts:12-19; PushChannelReq packages/protocol/src/http.ts:30-33; route devices.ts:23-32; tests FakeFcm helpers.ts:14-21 + push.test.ts/contract.test.ts/migration-000x.test.ts; docs lines PROTOCOLO.md:346/475-495).
 
 - L3 (verify mw5b6hel-e-wbi0, 2026-11-06): overall PASS; O1 HIGH (APNs payload 4177 B > 4096 B limit with the shared 3000 B body cap), O2 medium (real-sender mapping untested; provider JWT refreshed every send - TooManyProviderTokenUpdates risk), O3 low (stale env when re-registering without apnsEnvironment; schema accepts platform:"android" while docs say "ios"), O4 low (collapseId for non-prompt kinds = agentId, untested; 64 B Apple limit not measured). Suggested regression tests recorded above as T3/T4 scope.
+- L4 (parent-approved continuation): T5 (verify O2, both halves):
+  Scope A - provider-token cache in src/push/apns.ts:
+  - Cache the signed ES256 provider token in the real sender factory: reuse the SAME JWT for ~40 minutes (inside Apple's "not more than once per 20 min" refresh contract, before the 60-min expiry); regenerate lazily when older than 40 min or when invalidated by a 403 ExpiredProviderToken response (then ONE regeneration + ONE retry of the same send; a second failure surfaces as ApnsError; no infinite loop).
+  - Injectable clock (default Date.now) driving the threshold.
+  - The .p8 is read only at factory creation, never logged.
+
+  Scope B - real-sender mapping pinned WITHOUT network:
+  - Add a minimal HTTP/2-client seam to createApnsSender (options/client-factory parameter) so tests can inject a fake client returning raw status/reason pairs.
+  - RED tests in NEW test/apns.test.ts: (1) first send signs a JWT and issues an HTTP/2 request with headers apns-topic/collapse-id/push-type/priority; (2) two sends <40 min apart reuse the SAME provider token (captured by the fake); (3) a send after simulated 50 min signs a NEW token; (4) 403 ExpiredProviderToken → exactly one retry within the same send, one new token signed, send succeeds; (5) 410 → Unregistered mapping; (6) 400 reason BadDeviceToken → BadDeviceToken; (7) other 5xx → generic reject.
