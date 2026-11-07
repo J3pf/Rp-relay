@@ -51,7 +51,7 @@ describe("contrato: registro push de dispositivos", () => {
 		const device = await pairDevice(t);
 		const response = await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
 			platform: "ios",
-			apnsToken: "apns-device-token",
+			apnsToken: "1".repeat(64),
 			apnsEnvironment: "sandbox",
 			direct: true,
 		});
@@ -65,12 +65,12 @@ describe("contrato: registro push de dispositivos", () => {
 	it("un nuevo token APNs sin entorno borra el entorno anterior", async () => {
 		const device = await pairDevice(t);
 		await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
-			apnsToken: "old-apns-token",
+			apnsToken: "2".repeat(64),
 			apnsEnvironment: "sandbox",
 			direct: false,
 		});
 		const response = await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
-			apnsToken: "new-apns-token",
+			apnsToken: "3".repeat(64),
 			direct: false,
 		});
 
@@ -79,13 +79,13 @@ describe("contrato: registro push de dispositivos", () => {
 		expect(listed.json.devices[0]).toMatchObject({ apns: true });
 		expect(listed.json.devices[0]).not.toHaveProperty("apnsEnvironment");
 		await api(t, "POST", "/v1/devices/me/push-test", device.deviceToken);
-		expect(t.apns!.sent.at(-1)).toMatchObject({ token: "new-apns-token", host: "api.push.apple.com" });
+		expect(t.apns!.sent.at(-1)).toMatchObject({ token: "3".repeat(64), host: "api.push.apple.com" });
 	});
 
 	it("apnsToken:null borra token y entorno", async () => {
 		const device = await pairDevice(t);
 		await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
-			apnsToken: "old-apns-token",
+			apnsToken: "4".repeat(64),
 			apnsEnvironment: "sandbox",
 			direct: false,
 		});
@@ -104,7 +104,7 @@ describe("contrato: registro push de dispositivos", () => {
 		const device = await pairDevice(t);
 		await api(t, "PUT", "/v1/devices/me/push", device.deviceToken, {
 			fcmToken: "android-fcm-token",
-			apnsToken: "apns-token-to-keep",
+			apnsToken: "5".repeat(64),
 			apnsEnvironment: "sandbox",
 			direct: false,
 		});
@@ -115,7 +115,7 @@ describe("contrato: registro push de dispositivos", () => {
 		expect(listed.json.devices[0]).toMatchObject({ fcm: true, apns: true, apnsEnvironment: "sandbox" });
 		await api(t, "POST", "/v1/devices/me/push-test", device.deviceToken);
 		expect(t.fcm.sent.at(-1)?.token).toBe("android-fcm-token");
-		expect(t.apns!.sent.at(-1)).toMatchObject({ token: "apns-token-to-keep", host: "api.development.push.apple.com" });
+		expect(t.apns!.sent.at(-1)).toMatchObject({ token: "5".repeat(64), host: "api.development.push.apple.com" });
 	});
 
 	it("rechaza un entorno APNs desconocido sin cambiar los dispositivos", async () => {

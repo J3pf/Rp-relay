@@ -1,4 +1,5 @@
 import { MachinePatch, NotifyPrefs, PushChannelReq } from "@j3pf/rp-protocol";
+import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
 import type { DeviceRow } from "../../db/repos/index.js";
@@ -6,6 +7,14 @@ import type { MachinePatchRow } from "../../db/repos/machines.js";
 import { parsePrefs } from "../../push/prefs.js";
 import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
+
+/* apnsToken, when present and non-empty, MUST be lowercase hexadecimal, exactly 64 characters (32 bytes, APNs device-token form), no separators: /^[0-9a-f]{64}$/ otherwise 400. Empty string clears (normalize to null). The app client sends hex only (ApnsTokenFormat.hexLowercase); relay never decodes or transforms the value. */
+const DevicePushReq = Type.Intersect([
+	PushChannelReq,
+	Type.Object({
+		apnsToken: Type.Optional(Type.Union([Type.Null(), Type.Literal(""), Type.String({ pattern: "^[0-9a-f]{64}$" })])),
+	}),
+]);
 
 const present = (d: DeviceRow, me: string, live: boolean) => ({
 	deviceId: d.id,
@@ -22,7 +31,7 @@ const present = (d: DeviceRow, me: string, live: boolean) => ({
 });
 
 export function registerDevices(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
-	app.put("/v1/devices/me/push", { schema: { body: PushChannelReq }, preHandler: auth.device }, async (req) => {
+	app.put("/v1/devices/me/push", { schema: { body: DevicePushReq }, preHandler: auth.device }, async (req) => {
 		const b = req.body as {
 			fcmToken?: string | null;
 			direct: boolean;

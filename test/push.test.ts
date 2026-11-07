@@ -140,7 +140,7 @@ async function enableFcm(dev: { deviceToken: string }, token = "fcm-token-1", di
 
 async function enableApns(
 	dev: { deviceToken: string },
-	token = "apns-token-1",
+	token = "a".repeat(64),
 	environment: "sandbox" | "production" = "production",
 	direct = false,
 ) {
@@ -406,7 +406,7 @@ describe("canal APNs", () => {
 		await sleep(150);
 
 		const msg = t.apns!.sent.find((x) => x.payload.k === "prompt")!;
-		expect(msg.token).toBe("apns-token-1");
+		expect(msg.token).toBe("a".repeat(64));
 		expect(msg.host).toBe("api.push.apple.com");
 		expect(Object.keys(msg.payload).sort()).toEqual(["aps", "c", "k", "n", "v"]);
 		expect(msg.payload).toMatchObject({ v: "1", k: "prompt", n: expect.any(String), c: expect.any(String) });
@@ -459,16 +459,16 @@ describe("canal APNs", () => {
 	it("dirige sandbox y production a sus hosts APNs respectivos", async () => {
 		const sandbox = await pairDevice(t, "iPhone Sandbox");
 		const production = await pairDevice(t, "iPhone Production");
-		await enableApns(sandbox, "sandbox-token", "sandbox");
-		await enableApns(production, "production-token", "production");
+		await enableApns(sandbox, "b".repeat(64), "sandbox");
+		await enableApns(production, "c".repeat(64), "production");
 		const m = await pairMachine(t);
 		const agent = await connectAgent(t, m, "apns-hosts");
 		agent.client.send("prompt.open", promptBody(agent.agentId));
 		await sleep(150);
 
 		expect(t.apns!.sent).toHaveLength(2);
-		expect(t.apns!.sent.find((x) => x.token === "sandbox-token")?.host).toBe("api.development.push.apple.com");
-		expect(t.apns!.sent.find((x) => x.token === "production-token")?.host).toBe("api.push.apple.com");
+		expect(t.apns!.sent.find((x) => x.token === "b".repeat(64))?.host).toBe("api.development.push.apple.com");
+		expect(t.apns!.sent.find((x) => x.token === "c".repeat(64))?.host).toBe("api.push.apple.com");
 		agent.client.close();
 	});
 
@@ -477,7 +477,7 @@ describe("canal APNs", () => {
 		["BadDeviceToken", 400],
 	] as const)("el código APNs %s limpia token y entorno", async (code, status) => {
 		const dev = await pairDevice(t);
-		await enableApns(dev, `token-${code}`, "sandbox");
+		await enableApns(dev, code === "Unregistered" ? "d".repeat(64) : "e".repeat(64), "sandbox");
 		const m = await pairMachine(t);
 		const agent = await connectAgent(t, m, `cleanup-${code}`);
 		t.apns!.fail = new ApnsError(code, status, code);
@@ -502,7 +502,7 @@ describe("canal APNs", () => {
 		agent.client.send("prompt.open", promptBody(agent.agentId));
 		await sleep(150);
 		expect(t.relay.ctx.repos.devices.get(dev.deviceId)).toMatchObject({
-			apns_token: "apns-token-1",
+			apns_token: "a".repeat(64),
 			apns_env: "production",
 		});
 		agent.client.close();
