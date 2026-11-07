@@ -7,6 +7,8 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-07
+
 ### Añadido: canal APNs cifrado para iOS
 - Envío opcional de notificaciones por HTTP/2 APNs con sobre AES-256-GCM opaco, prioridad/collapse-id y limpieza de tokens inválidos.
 - Limita el JSON APNs completo a 4096 B con un presupuesto de cuerpo de 2900 B; FCM conserva su presupuesto de cuerpo de 3000 B. El ajuste conserva el orden `message` → máximo tres `options` → `title` (120 caracteres) y, si hace falta, recorta cadenas en el orden `detail`, `preview`, `agentLabel`, `machineContext`, `machineName` y luego por clave ascendente; como último recurso elimina campos opcionales en ese orden y después por clave ascendente.
