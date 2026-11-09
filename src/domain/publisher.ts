@@ -3,6 +3,8 @@ import type { Ctx } from "../context.js";
 
 /** Difusión de cambios de estado a las apps (machines.update, agents.update, hosts.update). */
 export class Publisher {
+	private lastDirectSignature = new Map<string, string>();
+
 	constructor(private c: () => Ctx) {}
 
 	agent(agentId: string): void {
@@ -13,13 +15,27 @@ export class Publisher {
 		if (m?.revoked_at) return;
 		const s = summaries.agent(row);
 		hub.broadcastApps(envelope("agents.update", { upsert: [s], remove: [] }), { mode: "foreground" });
-		// el canal directo recibe la versión resumida (sin vista previa del último mensaje)
-		hub.broadcastApps(envelope("agents.update", { upsert: [{ ...s, lastMessagePreview: null }], remove: [] }), {
-			mode: "direct",
-		});
+		// el canal directo recibe la versión resumida (sin vista previa del último mensaje) sólo si cambiaron campos relevantes
+		const directSig = JSON.stringify([
+			s.status,
+			s.online,
+			s.openPromptCount,
+			s.sessionName,
+			s.cwd,
+			s.gitBranch,
+			s.machineName,
+			s.machineContext,
+		]);
+		if (this.lastDirectSignature.get(agentId) !== directSig) {
+			this.lastDirectSignature.set(agentId, directSig);
+			hub.broadcastApps(envelope("agents.update", { upsert: [{ ...s, lastMessagePreview: null }], remove: [] }), {
+				mode: "direct",
+			});
+		}
 	}
 
 	agentRemoved(agentId: string): void {
+		this.lastDirectSignature.delete(agentId);
 		this.c().hub.broadcastApps(envelope("agents.update", { upsert: [], remove: [agentId] }));
 	}
 
