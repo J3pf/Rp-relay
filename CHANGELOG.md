@@ -7,6 +7,15 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-09
+
+### Añadido: telemetría activeTask y estado Git sucio
+- Expone `activeTask` (`toolSummary`) y el indicador de cambios Git no commiteados (`gitDirty`) en `AgentSummary`.
+- Conserva `lastMessagePreview` y `activeTask` en `Publisher.ts` para agentes en ejecución en modo `direct`.
+- Intervalo de heartbeat a 240 segundos para sockets de push directo en segundo plano, reduciendo consumo de batería.
+- Deduplicación de emisiones `agents.update` sobre canal de push directo para evitar ráfagas de red redundantes.
+- Protección en desregistro de sesiones Herdr concurrentes sobre un mismo pane.
+
 ## [0.7.0] - 2026-11-07
 
 ### Añadido: canal APNs cifrado para iOS

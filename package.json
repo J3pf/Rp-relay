@@ -1,6 +1,6 @@
 {
   "name": "@j3pf/rp-relay",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Relay autoalojable que conecta agentes Pi con la app Android RP",
   "type": "module",
   "bin": {
