@@ -388,6 +388,17 @@ export class AgentService {
 		if (!agent || agent.archived_at !== null) throw new RelayError("not_found", "agente desconocido");
 		const paneId = paneBinding(agent);
 		if (!paneId) throw new RelayError("agent_close_unsupported", "el agente no corre en un panel de herdr");
+		// Si el agente ya está offline y otro agente activo usa actualmente el mismo panel de Herdr,
+		// archivamos esta sesión sin matar el panel vivo del otro agente.
+		if (!agent.online) {
+			const sharedByLiveAgent = repos.agents
+				.byMachine(agent.machine_id)
+				.some((other) => other.id !== agentId && other.online === 1 && paneBinding(other) === paneId);
+			if (sharedByLiveAgent) {
+				this.archive(agentId);
+				return;
+			}
+		}
 		const machine = repos.machines.get(agent.machine_id);
 		if (!machine || machine.revoked_at) throw new RelayError("not_found", "PC desconocida");
 
