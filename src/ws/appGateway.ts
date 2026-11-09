@@ -28,6 +28,7 @@ import { RelayError } from "../util/errors.js";
 import { type AppConn, bindWsGateway, startHeartbeat, WsConn } from "./conn.js";
 
 const TOUCH_EVERY_MS = 5 * 60_000;
+const DIRECT_PING_INTERVAL_MS = 240_000;
 
 class WsAppConn extends WsConn implements AppConn {
 	readonly id = ulid();
@@ -261,7 +262,10 @@ export function handleAppSocket(
 	const { hub, log } = c();
 	hub.addApp(conn);
 	log.info({ deviceId: device.id, mode, connId: conn.id }, "app conectada");
-	startHeartbeat(socket, { onPong: () => session.touch() });
+	startHeartbeat(socket, {
+		...(mode === "direct" ? { pingMs: DIRECT_PING_INTERVAL_MS } : {}),
+		onPong: () => session.touch(),
+	});
 	bindWsGateway({
 		socket,
 		conn,
