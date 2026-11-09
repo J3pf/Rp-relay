@@ -15,9 +15,11 @@ export class Publisher {
 		if (m?.revoked_at) return;
 		const s = summaries.agent(row);
 		hub.broadcastApps(envelope("agents.update", { upsert: [s], remove: [] }), { mode: "foreground" });
-		// el canal directo recibe la versión resumida (sin vista previa del último mensaje) sólo si cambiaron campos relevantes
+		// el canal directo recibe actualizaciones cuando cambian estado, tarea activa o metadatos del agente
+		const isWorking = s.status === "working" || s.status === "compacting";
 		const directSig = JSON.stringify([
 			s.status,
+			s.activeTask,
 			s.online,
 			s.openPromptCount,
 			s.sessionName,
@@ -28,9 +30,15 @@ export class Publisher {
 		]);
 		if (this.lastDirectSignature.get(agentId) !== directSig) {
 			this.lastDirectSignature.set(agentId, directSig);
-			hub.broadcastApps(envelope("agents.update", { upsert: [{ ...s, lastMessagePreview: null }], remove: [] }), {
-				mode: "direct",
-			});
+			hub.broadcastApps(
+				envelope("agents.update", {
+					upsert: [{ ...s, lastMessagePreview: isWorking ? s.lastMessagePreview : null }],
+					remove: [],
+				}),
+				{
+					mode: "direct",
+				},
+			);
 		}
 	}
 
