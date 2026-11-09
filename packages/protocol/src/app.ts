@@ -48,6 +48,7 @@ export const AgentSummary = Type.Object({
 	redacted: Type.Boolean(),
 	spawnedByHost: Type.Boolean(),
 	kind: Type.Optional(Type.String()),
+	activeTask: Type.Optional(OptNullable(Type.String())),
 });
 export type AgentSummary = Static<typeof AgentSummary>;
 

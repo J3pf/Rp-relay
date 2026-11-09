@@ -69,6 +69,8 @@ export class Summaries {
 		const { repos, hub } = this.c();
 		const m = machine ?? repos.machines.get(a.machine_id)!;
 		const open = openByAgent ? (openByAgent.get(a.id) ?? 0) : repos.prompts.countOpenForAgent(a.id);
+		const gitBranch =
+			a.git_branch && a.git_dirty === 1 && !a.git_branch.endsWith(" *") ? `${a.git_branch} *` : a.git_branch;
 		return {
 			agentId: a.id,
 			machineId: a.machine_id,
@@ -77,7 +79,7 @@ export class Summaries {
 			machineColor: m.color,
 			sessionName: a.session_name,
 			cwd: a.cwd,
-			gitBranch: a.git_branch,
+			gitBranch,
 			model: a.model,
 			status: a.status as AgentSummary["status"],
 			online: hub.agents.has(a.id),
@@ -90,6 +92,7 @@ export class Summaries {
 			redacted: a.redacted === 1,
 			spawnedByHost: a.spawn_id !== null,
 			kind: a.kind,
+			...(a.status === "working" && a.status_detail ? { activeTask: a.status_detail } : {}),
 		};
 	}
 
