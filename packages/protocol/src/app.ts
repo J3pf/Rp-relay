@@ -49,6 +49,9 @@ export const AgentSummary = Type.Object({
 	spawnedByHost: Type.Boolean(),
 	kind: Type.Optional(Type.String()),
 	activeTask: Type.Optional(OptNullable(Type.String())),
+	contextTokens: Type.Optional(OptNullable(Type.Integer({ minimum: 0 }))),
+	contextWindow: Type.Optional(OptNullable(Type.Integer({ minimum: 0 }))),
+	contextPercent: Type.Optional(OptNullable(Type.Integer({ minimum: 0, maximum: 100 }))),
 });
 export type AgentSummary = Static<typeof AgentSummary>;
 

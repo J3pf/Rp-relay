@@ -20,6 +20,36 @@ const parse = <T>(s: string | null): T | null => {
 	}
 };
 
+function parseContextSpec(spec: string | null | undefined): {
+	contextTokens: number;
+	contextWindow: number;
+	contextPercent: number;
+} | null {
+	if (!spec) return null;
+	const match = /^(\d+)\/(\d+)$/.exec(spec.trim());
+	if (!match) return null;
+	const tokens = Number.parseInt(match[1]!, 10);
+	const window = Number.parseInt(match[2]!, 10);
+	if (!Number.isFinite(tokens) || !Number.isFinite(window) || tokens < 0 || window <= 0) return null;
+	const percent = Math.min(100, Math.max(0, Math.round((tokens / window) * 100)));
+	return { contextTokens: tokens, contextWindow: window, contextPercent: percent };
+}
+
+function extractContextFromRow(
+	a: AgentRow,
+	herdr: Record<string, unknown> | null,
+): { contextTokens: number; contextWindow: number; contextPercent: number } | null {
+	const statuses = parse<Record<string, string>>(a.statuses);
+	const fromStatus = parseContextSpec(statuses?.["rp:context"]);
+	if (fromStatus) return fromStatus;
+	const tabId = typeof herdr?.tabId === "string" ? herdr.tabId : null;
+	if (tabId) {
+		const m = /@(\d+\/\d+)(?=\||$)/.exec(tabId);
+		if (m) return parseContextSpec(m[1]);
+	}
+	return null;
+}
+
 export { basename };
 
 export class Summaries {
@@ -71,6 +101,8 @@ export class Summaries {
 		const open = openByAgent ? (openByAgent.get(a.id) ?? 0) : repos.prompts.countOpenForAgent(a.id);
 		const gitBranch =
 			a.git_branch && a.git_dirty === 1 && !a.git_branch.endsWith(" *") ? `${a.git_branch} *` : a.git_branch;
+		const herdr = parse<Record<string, unknown>>(a.herdr);
+		const ctxUsage = extractContextFromRow(a, herdr);
 		return {
 			agentId: a.id,
 			machineId: a.machine_id,
@@ -87,12 +119,13 @@ export class Summaries {
 			openPromptCount: open,
 			lastMessagePreview: a.last_preview,
 			launcher: a.launcher,
-			herdr: parse(a.herdr),
+			herdr,
 			gentleMode: a.gentle_mode,
 			redacted: a.redacted === 1,
 			spawnedByHost: a.spawn_id !== null,
 			kind: a.kind,
 			...(a.status === "working" && a.status_detail ? { activeTask: a.status_detail } : {}),
+			...(ctxUsage ?? {}),
 		};
 	}
 
