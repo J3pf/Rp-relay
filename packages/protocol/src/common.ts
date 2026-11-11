@@ -69,6 +69,7 @@ export const AgentStatus = Type.Union([
 	Type.Literal("waiting_input"),
 	Type.Literal("compacting"),
 	Type.Literal("error"),
+	Type.Literal("done"),
 ]);
 export type AgentStatus = Static<typeof AgentStatus>;
 
