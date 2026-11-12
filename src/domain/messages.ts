@@ -91,13 +91,15 @@ export class MessageService {
 	/** `user.message.ack` del plugin. */
 	onAck(agentId: string, ack: UserMessageAck): void {
 		const k = this.key(agentId, ack.clientMsgId);
-		let per = this.done.get(agentId);
-		if (!per) {
-			per = new Map();
-			this.done.set(agentId, per);
+		if (ack.disposition !== "rejected" && !ack.error) {
+			let per = this.done.get(agentId);
+			if (!per) {
+				per = new Map();
+				this.done.set(agentId, per);
+			}
+			per.set(ack.clientMsgId, ack);
+			while (per.size > KEEP) per.delete(per.keys().next().value!);
 		}
-		per.set(ack.clientMsgId, ack);
-		while (per.size > KEEP) per.delete(per.keys().next().value!);
 		const w = this.waiters.get(k);
 		this.waiters.delete(k);
 		this.pending.delete(k);
