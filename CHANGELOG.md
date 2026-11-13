@@ -7,6 +7,15 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-12
+
+### Añadido: estado `done` y telemetría de contexto en protocolo
+- Añade el estado `"done"` al esquema `AgentStatus` en `@j3pf/rp-protocol`.
+- Añade los campos de uso de contexto (`contextTokens`, `contextWindow`, `contextPercent`) a `AgentSummary`.
+
+### Corregido: reintentos de mensajes rechazados (`MessageService.onAck`)
+- `MessageService.onAck` ya no guarda en caché los ACKs con `disposition === "rejected"` o `error` en `this.done`, permitiendo que al tocar **Reintentar** con el mismo `clientMsgId` el mensaje se reenvíe al agente en lugar de devolver el rechazo cacheado.
+
 ## [0.8.0] - 2026-11-09
 
 ### Añadido: telemetría activeTask y estado Git sucio
