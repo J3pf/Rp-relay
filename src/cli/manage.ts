@@ -44,11 +44,12 @@ export async function devices(argv: string[]): Promise<void> {
 				fmtTime(d.last_seen_at),
 				d.revoked_at ? "revocado" : "activo",
 				d.fcm_token ? "fcm" : "",
+				d.apns_token ? "apns" : "",
 				d.direct_enabled ? "directo" : "",
 			]);
 		console.log(
 			rows.length
-				? table(rows, ["ID", "NOMBRE", "CREADO", "VISTO", "ESTADO", "FCM", "DIRECTO"])
+				? table(rows, ["ID", "NOMBRE", "CREADO", "VISTO", "ESTADO", "FCM", "APNS", "DIRECTO"])
 				: "No hay dispositivos emparejados.",
 		);
 	} finally {
@@ -118,7 +119,7 @@ export async function pushTest(argv: string[]): Promise<void> {
 	const { config, close } = open();
 	try {
 		const live = await adminCall<{
-			results?: { deviceId: string; direct: string; fcm: string; error?: string }[];
+			results?: { deviceId: string; direct: string; fcm: string; apns?: string; error?: string }[];
 			error?: { message: string };
 		}>(config, "POST", "/admin/push-test", { deviceId: argv[0] });
 		if (!live)
@@ -129,7 +130,9 @@ export async function pushTest(argv: string[]): Promise<void> {
 		const results = live.data.results ?? [];
 		if (results.length === 0) return console.log(c.yellow("No hay dispositivos a los que enviar."));
 		for (const r of results)
-			console.log(`${r.deviceId}  directo: ${r.direct}  fcm: ${r.fcm}${r.error ? `  (${r.error})` : ""}`);
+			console.log(
+				`${r.deviceId}  directo: ${r.direct}  fcm: ${r.fcm}  apns: ${r.apns ?? "off"}${r.error ? `  (${r.error})` : ""}`,
+			);
 	} finally {
 		close();
 	}

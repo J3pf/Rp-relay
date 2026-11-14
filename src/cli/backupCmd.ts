@@ -36,7 +36,16 @@ export async function restore(argv: string[]): Promise<void> {
 	const v = verifyDb(file);
 	if (!v.ok) throw new Error(`la copia no es válida: ${v.detail}`);
 	console.log(c.green("✓ integrity_check: ok"));
-	const live = await adminCall(config, "GET", "/admin/status").catch(() => null);
+	let live: Awaited<ReturnType<typeof adminCall>> = null;
+	try {
+		live = await adminCall(config, "GET", "/admin/status");
+	} catch (err) {
+		if (!values.force) {
+			throw new Error(
+				`no se pudo verificar si el relay está detenido (${(err as Error).message}); para el servicio o usa --force`,
+			);
+		}
+	}
 	if (live && !values.force)
 		throw new Error("el relay está en marcha: páralo antes de restaurar (systemctl stop rp-relay) o usa --force");
 	const r = restoreBackup(file, dbPath(config));

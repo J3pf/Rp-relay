@@ -58,12 +58,17 @@ export async function init(argv: string[]): Promise<void> {
 	if (existsSync(configFile) && !values.force) {
 		console.log(c.yellow(`• ${configFile} ya existe: se conserva (usa --force para sobrescribir)`));
 	} else {
-		mkdirSync(dirname(configFile), { recursive: true });
-		writeFileSync(configFile, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o640 });
+		mkdirSync(dirname(configFile), { recursive: true, mode: 0o700 });
+		writeFileSync(configFile, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
+		try {
+			chmodSync(configFile, 0o600);
+		} catch {
+			// sistemas de archivos sin permisos POSIX
+		}
 		console.log(c.green(`✓ configuración escrita en ${configFile}`));
 	}
 
-	mkdirSync(config.dataDir, { recursive: true, mode: 0o750 });
+	mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
 	mkdirSync(blobsDir(config), { recursive: true, mode: 0o700 });
 	mkdirSync(backupsDir(config), { recursive: true, mode: 0o700 });
 	const dbFile = dbPath(config);

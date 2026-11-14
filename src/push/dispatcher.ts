@@ -157,14 +157,22 @@ export class PushDispatcher {
 	get fcmEnabled(): boolean {
 		return this.fcm !== null;
 	}
+	get apnsEnabled(): boolean {
+		return this.apns !== null;
+	}
+	close(): void {
+		this.apns?.close?.();
+	}
 
 	// ---- eventos de dominio ----
 	promptOpened(p: PromptRow): void {
 		const { summaries, repos } = this.c();
-		if (repos.agents.get(p.agent_id)?.archived_at != null) return;
+		const agentRow = repos.agents.get(p.agent_id);
+		if (!agentRow || agentRow.archived_at != null) return;
+		const redacted = agentRow.redacted === 1;
 		const prompt = summaries.prompt(p);
 		const buttons = prompt.kind === "confirm" || (prompt.options?.length ?? 0) <= 3;
-		const body: PushPromptBody & { pushId?: string } = {
+		const body: PushPromptBody & { pushId?: string; redacted?: boolean } = {
 			promptId: p.id,
 			agentId: p.agent_id,
 			agentLabel: prompt.agentLabel,
@@ -173,14 +181,15 @@ export class PushDispatcher {
 			machineContext: prompt.machineContext,
 			kind: prompt.kind,
 			category: prompt.category,
-			title: prompt.title,
-			message: prompt.message ? prompt.message.slice(0, 500) : null,
+			title: redacted ? prompt.agentLabel : prompt.title,
+			message: redacted ? null : prompt.message ? prompt.message.slice(0, 500) : null,
 			options:
-				prompt.kind === "questionnaire" || !buttons
+				redacted || prompt.kind === "questionnaire" || !buttons
 					? []
 					: (prompt.options ?? []).slice(0, 3).map((o) => ({ id: o.id, label: o.label })),
-			allowFreeText: prompt.allowFreeText ?? false,
+			allowFreeText: redacted ? false : (prompt.allowFreeText ?? false),
 			danger: prompt.danger,
+			...(redacted ? { redacted: true } : {}),
 		};
 		repos.prompts.bumpPush(p.id);
 		const category: NotifyCategory = prompt.category === "permission" ? "permission" : "question";
@@ -209,16 +218,18 @@ export class PushDispatcher {
 		const a = repos.agents.get(agentId);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
 		if (!a || a.archived_at !== null || !m) return;
+		const redacted = a.redacted === 1;
 		void this.fanOut(
 			"settled",
 			agentId,
 			{
 				agentId,
 				agentLabel: summaries.agentLabel(a),
-				preview,
+				preview: redacted ? null : preview,
 				machineId: m.id,
 				machineName: m.name,
 				machineContext: m.context,
+				...(redacted ? { redacted: true } : {}),
 			},
 			{ machineId: m.id, category: "settled", agentId },
 		);
@@ -229,16 +240,18 @@ export class PushDispatcher {
 		const a = repos.agents.get(agentId);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
 		if (!a || a.archived_at !== null || !m) return;
+		const redacted = a.redacted === 1;
 		void this.fanOut(
 			"error",
 			agentId,
 			{
 				agentId,
 				agentLabel: summaries.agentLabel(a),
-				detail,
+				detail: redacted ? null : detail,
 				machineId: m.id,
 				machineName: m.name,
 				machineContext: m.context,
+				...(redacted ? { redacted: true } : {}),
 			},
 			{ machineId: m.id, category: "error", agentId },
 		);
@@ -249,19 +262,25 @@ export class PushDispatcher {
 		const a = repos.agents.get(agentId);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
 		if (!a || a.archived_at !== null || !m) return;
+		const redacted = a.redacted === 1;
 		void this.fanOut(
 			"terminal_wait",
 			agentId,
 			{
 				agentId,
 				agentLabel: summaries.agentLabel(a),
-				title,
+				title: redacted ? null : title,
 				machineId: m.id,
 				machineName: m.name,
 				machineContext: m.context,
+				...(redacted ? { redacted: true } : {}),
 			},
 			{ machineId: m.id, category: "terminal_wait", agentId },
 		);
+	}
+
+	terminalWaitCleared(agentId: string): void {
+		this.c().repos.outbox.dropByRefAndKind(agentId, "terminal_wait", Date.now());
 	}
 
 	/** Notificación de prueba: ignora preferencias y devuelve el resultado por canal. */
@@ -390,7 +409,7 @@ export class PushDispatcher {
 				await this.apns.send({
 					host: environment === "sandbox" ? "api.development.push.apple.com" : "api.push.apple.com",
 					token: d.apns_token,
-					payload: buildApnsPayload(d.push_key, kind, { ...body, pushId }),
+					payload: buildApnsPayload(d.push_key, kind, full),
 					headers: {
 						topic: apnsConfig?.bundleId ?? "",
 						collapseId: fitApnsCollapseId(ref),

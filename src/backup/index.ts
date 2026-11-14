@@ -86,16 +86,19 @@ export function restoreBackup(backupFile: string, dbFile: string, at = new Date(
 	}
 	rmSync(`${dbFile}-wal`, { force: true });
 	rmSync(`${dbFile}-shm`, { force: true });
+	const tmpFile = `${dbFile}.restore-${process.pid}.tmp`;
 	try {
-		copyFileSync(backupFile, dbFile);
+		copyFileSync(backupFile, tmpFile);
 		try {
-			chmodSync(dbFile, 0o600);
+			chmodSync(tmpFile, 0o600);
 		} catch {
 			// sistemas de archivos sin permisos POSIX
 		}
+		renameSync(tmpFile, dbFile);
 		const after = verifyDb(dbFile);
 		if (!after.ok) throw new Error(`la base restaurada no pasó la verificación: ${after.detail}`);
 	} catch (e) {
+		rmSync(tmpFile, { force: true });
 		if (previous && existsSync(previous)) {
 			rmSync(dbFile, { force: true });
 			renameSync(previous, dbFile);

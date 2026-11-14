@@ -27,11 +27,13 @@ export interface BuildHttpOptions {
 
 export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 	const { config, log, c } = o;
-	const behindProxy = config.trustProxy ?? ["127.0.0.1", "::1", "localhost"].includes(config.listen.host);
+	const isLocalHost = ["127.0.0.1", "::1", "localhost"].includes(config.listen.host);
+	const trustProxy = config.trustProxy !== undefined ? config.trustProxy : isLocalHost ? "127.0.0.1, ::1" : false;
+	const behindProxy = Boolean(trustProxy);
 	// SAFETY: withTypeProvider() changes only the compile-time provider type; the returned value remains the Fastify instance passed to route registrars.
 	const app = Fastify({
 		loggerInstance: log,
-		trustProxy: behindProxy,
+		trustProxy,
 		bodyLimit: 2 * 1024 * 1024,
 		logController: new LogController({ disableRequestLogging: true }),
 		...(o.https ? { https: o.https } : {}),

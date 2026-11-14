@@ -11,6 +11,12 @@ import { RelayError } from "../util/errors.js";
 import { DAY } from "../util/time.js";
 
 export const BLOB_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+const SAFE_MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/i;
+
+export function sanitizeMime(mime: string | undefined): string {
+	const base = (mime ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+	return SAFE_MIME_RE.test(base) ? base : "application/octet-stream";
+}
 
 const isControl = (ch: string): boolean => {
 	const c = ch.charCodeAt(0);
@@ -75,7 +81,7 @@ export class BlobStore {
 			id,
 			sha256: hash.digest("hex"),
 			name: sanitizeName(meta.name),
-			mime: meta.mime || "application/octet-stream",
+			mime: sanitizeMime(meta.mime),
 			size,
 			uploaded_by: meta.uploadedBy,
 			created_at: now,

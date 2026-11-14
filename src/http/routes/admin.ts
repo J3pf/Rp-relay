@@ -33,10 +33,8 @@ export function registerAdmin(app: FastifyInstance, c: () => Ctx): void {
 		)
 			throw new RelayError("unauthorized", "no disponible a través de proxy");
 		const remote = req.raw?.socket?.remoteAddress;
-		if (remote) {
-			const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
-			if (!isLoopback) throw new RelayError("unauthorized", "acceso administrativo restringido a loopback");
-		}
+		const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+		if (!isLoopback) throw new RelayError("unauthorized", "acceso administrativo restringido a loopback");
 		const ipKey = remote ?? "local";
 		const now = Date.now();
 		const entry = failedAttempts.get(ipKey);
@@ -66,6 +64,7 @@ export function registerAdmin(app: FastifyInstance, c: () => Ctx): void {
 			devices: repos.devices.active().length,
 			machines: repos.machines.list().length,
 			fcm: c().dispatcher.fcmEnabled,
+			apns: c().dispatcher.apnsEnabled,
 		};
 	});
 

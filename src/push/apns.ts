@@ -16,10 +16,12 @@ export interface ApnsMessage {
 
 export interface ApnsSender {
 	send(msg: ApnsMessage): Promise<void>;
+	close?(): void;
 }
 
 export interface ApnsHttp2Stream {
 	on(event: "data", listener: (chunk: Buffer | string) => void): this;
+	on(event: "error", listener: (error: Error) => void): this;
 	once(event: "response", listener: (headers: { ":status"?: number | string }) => void): this;
 	once(event: "error", listener: (error: Error) => void): this;
 	once(event: "end" | "close", listener: () => void): this;
@@ -29,7 +31,12 @@ export interface ApnsHttp2Stream {
 
 export interface ApnsHttp2Client {
 	request(headers: Record<string, string>): ApnsHttp2Stream;
+	on(event: "error", listener: (error: Error) => void): this;
+	off(event: "error", listener: (error: Error) => void): this;
 	once(event: "error", listener: (error: Error) => void): this;
+	once(event: "close" | "goaway", listener: () => void): this;
+	closed?: boolean;
+	destroyed?: boolean;
 	close(): void;
 }
 
@@ -92,7 +99,27 @@ function providerToken(config: ApnsConfig, privateKey: string, now: number): str
 export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions = {}): ApnsSender {
 	const privateKey = readFileSync(config.keyFile, "utf8");
 	const now = options.now ?? Date.now;
+	// Validate the ES256 private key at startup so invalid PEM files fail fast.
+	providerToken(config, privateKey, now());
 	const clientFactory = options.clientFactory ?? ((authority) => connect(authority) as unknown as ApnsHttp2Client);
+	const sessions = new Map<string, ApnsHttp2Client>();
+	const getSession = (authority: string): ApnsHttp2Client => {
+		const existing = sessions.get(authority);
+		if (existing && !existing.closed && !existing.destroyed) return existing;
+		const session = clientFactory(authority);
+		const evict = () => {
+			if (sessions.get(authority) === session) sessions.delete(authority);
+		};
+		if (typeof session.on === "function") {
+			session.on("error", evict);
+		} else {
+			session.once("error", evict);
+		}
+		session.once?.("close", evict);
+		session.once?.("goaway", evict);
+		sessions.set(authority, session);
+		return session;
+	};
 	let cachedToken: { value: string; createdAt: number } | null = null;
 	const getProviderToken = (): string => {
 		const currentTime = now();
@@ -103,37 +130,63 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 	};
 
 	const sendRequest = (msg: ApnsMessage, token: string): Promise<void> => {
-		const session = clientFactory(`https://${msg.host}`);
+		const authority = `https://${msg.host}`;
+		const session = getSession(authority);
 		return new Promise<void>((resolve, reject) => {
 			let status = 0;
 			let settled = false;
 			const chunks: Buffer[] = [];
+			const cleanup = () => {
+				session.off?.("error", fail);
+			};
 			const fail = (error: Error) => {
 				if (settled) return;
 				settled = true;
+				cleanup();
 				reject(error);
 			};
-			const req = session.request({
-				":method": "POST",
-				":path": `/3/device/${encodeURIComponent(msg.token)}`,
-				authorization: `bearer ${token}`,
-				"content-type": "application/json",
-				"apns-topic": msg.headers.topic,
-				"apns-collapse-id": fitApnsCollapseId(msg.headers.collapseId),
-				"apns-push-type": msg.headers.pushType,
-				"apns-priority": String(msg.headers.priority),
-			});
-			session.once("error", fail);
+			let req: ApnsHttp2Stream;
+			try {
+				req = session.request({
+					":method": "POST",
+					":path": `/3/device/${encodeURIComponent(msg.token)}`,
+					authorization: `bearer ${token}`,
+					"content-type": "application/json",
+					"apns-topic": msg.headers.topic,
+					"apns-collapse-id": fitApnsCollapseId(msg.headers.collapseId),
+					"apns-push-type": msg.headers.pushType,
+					"apns-priority": String(msg.headers.priority),
+				});
+			} catch (err) {
+				if (sessions.get(authority) === session) sessions.delete(authority);
+				try {
+					session.close();
+				} catch {
+					// ignore close errors on broken session
+				}
+				reject(err as Error);
+				return;
+			}
+			if (typeof session.on === "function") {
+				session.on("error", fail);
+			} else {
+				session.once("error", fail);
+			}
 			req.once("response", (headers) => {
 				status = Number(headers[":status"] ?? 0);
 			});
 			req.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
-			req.once("error", fail);
+			if (typeof req.on === "function") {
+				req.on("error", fail);
+			} else {
+				req.once("error", fail);
+			}
 			req.once("end", () => {
 				if (settled) return;
 				const body = Buffer.concat(chunks).toString("utf8");
 				if (status >= 200 && status < 300) {
 					settled = true;
+					cleanup();
 					resolve();
 					return;
 				}
@@ -156,9 +209,12 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 				fail(new ApnsError("apns/timeout", 0, "timeout al enviar APNs"));
 			}, APNS_TIMEOUT_MS);
 			timer.unref();
-			req.once("close", () => clearTimeout(timer));
+			req.once("close", () => {
+				clearTimeout(timer);
+				cleanup();
+			});
 			req.end(JSON.stringify(msg.payload));
-		}).finally(() => session.close());
+		});
 	};
 
 	return {
@@ -171,6 +227,16 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 				if (cachedToken?.value === token) cachedToken = null;
 				await sendRequest(msg, getProviderToken());
 			}
+		},
+		close() {
+			for (const s of sessions.values()) {
+				try {
+					s.close();
+				} catch {
+					// ignore
+				}
+			}
+			sessions.clear();
 		},
 	};
 }

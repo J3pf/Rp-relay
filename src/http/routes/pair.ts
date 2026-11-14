@@ -37,6 +37,7 @@ export function registerPair(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 				body: Type.Optional(Type.Object({ name: Type.Optional(Type.String()), context: Type.Optional(Type.String()) })),
 				response: { 200: PairCodeRes },
 			},
+			config: pairLimit,
 			preHandler: auth.device,
 		},
 		async (req) => {

@@ -135,6 +135,23 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 		}
 	}
 
+	// APNs
+	if (!config.apns) add("APNs", "ok", "no configurado (opcional): sólo FCM / canal directo");
+	else {
+		try {
+			const pem = readFileSync(config.apns.keyFile, "utf8");
+			if (!pem.includes("PRIVATE KEY")) throw new Error("el archivo .p8 no contiene una PRIVATE KEY válida");
+			const mode = statSync(config.apns.keyFile).mode & 0o777;
+			add(
+				"APNs",
+				mode & 0o077 ? "warn" : "ok",
+				`${config.apns.bundleId} (${config.apns.env})${mode & 0o077 ? ` — permisos ${mode.toString(8)}: usa chmod 600` : ""}`,
+			);
+		} catch (e) {
+			add("APNs", "fail", (e as Error).message);
+		}
+	}
+
 	// TLS
 	if (config.tls) {
 		if (isFileTls(config.tls)) {

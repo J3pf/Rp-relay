@@ -117,14 +117,14 @@ export class Summaries {
 			online: hub.agents.has(a.id),
 			lastSeenAt: a.last_seen_at,
 			openPromptCount: open,
-			lastMessagePreview: a.last_preview,
+			lastMessagePreview: a.redacted === 1 ? null : a.last_preview,
 			launcher: a.launcher,
 			herdr,
 			gentleMode: a.gentle_mode,
 			redacted: a.redacted === 1,
 			spawnedByHost: a.spawn_id !== null,
 			kind: a.kind,
-			...(a.status === "working" && a.status_detail ? { activeTask: a.status_detail } : {}),
+			...(a.status === "working" && a.status_detail && a.redacted !== 1 ? { activeTask: a.status_detail } : {}),
 			...(ctxUsage ?? {}),
 		};
 	}
@@ -217,7 +217,7 @@ export class Summaries {
 					cwd: a.cwd,
 					archivedAt: a.archived_at,
 					lastSeenAt: a.last_seen_at,
-					lastMessagePreview: a.last_preview,
+					lastMessagePreview: a.redacted === 1 ? null : a.last_preview,
 					messageCount: repos.events.count(a.id),
 				},
 			];
