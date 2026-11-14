@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { backupNow, restoreBackup, verifyDb } from "../src/backup/index.js";
 import { openDb } from "../src/db/index.js";
 import { migrate } from "../src/db/migrate.js";
 import { Repos } from "../src/db/repos/index.js";
@@ -196,5 +197,157 @@ describe("CLI adminCall security semantics & DB fallback", () => {
 		dbCheck.close();
 		expect(row).toBeDefined();
 		expect(row!.revoked_at).toBeTypeOf("number");
+	});
+});
+
+describe("rp-relay restore & restoreBackup (C-06)", () => {
+	let workDir: string;
+	let cfgFile: string;
+	let dataDir: string;
+	let backupFile: string;
+	let env: Record<string, string>;
+
+	beforeAll(async () => {
+		workDir = mkdtempSync(join(tmpdir(), "rp-cli-restore-"));
+		cfgFile = join(workDir, "etc", "config.json");
+		dataDir = join(workDir, "data");
+		env = { RP_CONFIG: cfgFile };
+
+		await cli([
+			"init",
+			"--yes",
+			"--config",
+			cfgFile,
+			"--data-dir",
+			dataDir,
+			"--port",
+			"18787",
+			"--public-url",
+			"http://127.0.0.1:18787",
+		]);
+
+		// Seed a device in the DB, take a backup, then replace DB state with a different device
+		const dbPath = join(dataDir, "relay.db");
+		const db = openDb(dbPath);
+		migrate(db);
+		new Repos(db).devices.insert({
+			id: "dev-from-backup",
+			name: "Backup Phone",
+			tokenHash: Buffer.from("hash-backup"),
+			pushKey: Buffer.alloc(32),
+			fcmToken: null,
+			now: Date.now(),
+		});
+		backupFile = backupNow(db, join(workDir, "backups"));
+		db.close();
+
+		const dbLive = openDb(dbPath);
+		new Repos(dbLive).devices.insert({
+			id: "dev-live-only",
+			name: "Live Phone",
+			tokenHash: Buffer.from("hash-live"),
+			pushKey: Buffer.alloc(32),
+			fcmToken: null,
+			now: Date.now(),
+		});
+		dbLive.close();
+	});
+
+	afterAll(() => {
+		rmSync(workDir, { recursive: true, force: true });
+	});
+
+	it("non-ECONNREFUSED admin probe error fails restore unless --force is passed", async () => {
+		const hangingServer = createServer((_req, _res) => {
+			// Intentionally hold connection open to trigger adminCall timeout
+		});
+		await new Promise<void>((resolve) => hangingServer.listen(0, "127.0.0.1", () => resolve()));
+		const port = (hangingServer.address() as any).port;
+
+		try {
+			const failed = await cli(["restore", backupFile], {
+				...env,
+				RP_LISTEN_PORT: String(port),
+				RP_ADMIN_TIMEOUT_MS: "200",
+			});
+			expect(failed.code).toBe(1);
+			expect(failed.err).toContain("no se pudo verificar si el relay está detenido");
+			expect(failed.err).toContain("--force");
+
+			// DB must remain untouched (dev-live-only still present)
+			const dbBeforeForce = openDb(join(dataDir, "relay.db"), { readonly: true });
+			expect(new Repos(dbBeforeForce).devices.get("dev-live-only")).toBeDefined();
+			dbBeforeForce.close();
+
+			// With --force, restore proceeds despite the probe error
+			const forced = await cli(["restore", backupFile, "--force"], {
+				...env,
+				RP_LISTEN_PORT: String(port),
+				RP_ADMIN_TIMEOUT_MS: "200",
+			});
+			expect(forced.code).toBe(0);
+			expect(forced.out).toContain("base restaurada");
+
+			const dbAfterForce = openDb(join(dataDir, "relay.db"), { readonly: true });
+			const reposAfter = new Repos(dbAfterForce);
+			expect(reposAfter.devices.get("dev-from-backup")).toBeDefined();
+			expect(reposAfter.devices.get("dev-live-only")).toBeUndefined();
+			dbAfterForce.close();
+		} finally {
+			hangingServer.closeAllConnections();
+			hangingServer.close();
+		}
+	});
+
+	it("restoreBackup copies atomically via temp file with 0o600 mode, cleans WAL/SHM, and renames cleanly", () => {
+		const dir = mkdtempSync(join(tmpdir(), "rp-restore-atomic-"));
+		try {
+			const srcDb = join(dir, "source.db");
+			const sdb = openDb(srcDb);
+			migrate(sdb);
+			new Repos(sdb).devices.insert({
+				id: "dev-atomic-backup",
+				name: "Atomic Backup",
+				tokenHash: Buffer.from("hash-atomic-b"),
+				pushKey: Buffer.alloc(32),
+				fcmToken: null,
+				now: Date.now(),
+			});
+			const bkp = backupNow(sdb, join(dir, "bkp"));
+			sdb.close();
+			chmodSync(bkp, 0o644);
+
+			const targetDb = join(dir, "target.db");
+			const tdb = openDb(targetDb);
+			migrate(tdb);
+			new Repos(tdb).devices.insert({
+				id: "dev-atomic-prev",
+				name: "Previous",
+				tokenHash: Buffer.from("hash-atomic-p"),
+				pushKey: Buffer.alloc(32),
+				fcmToken: null,
+				now: Date.now(),
+			});
+			tdb.close();
+			writeFileSync(`${targetDb}-wal`, "stale-wal");
+			writeFileSync(`${targetDb}-shm`, "stale-shm");
+
+			const { previous } = restoreBackup(bkp, targetDb);
+			expect(previous).toBeTruthy();
+			expect(existsSync(previous!)).toBe(true);
+			expect(existsSync(`${targetDb}-wal`)).toBe(false);
+			expect(existsSync(`${targetDb}-shm`)).toBe(false);
+			expect(statSync(targetDb).mode & 0o777).toBe(0o600);
+			expect(verifyDb(targetDb)).toEqual({ ok: true, detail: "ok" });
+			expect(readdirSync(dir).filter((f) => f.includes(".tmp"))).toEqual([]);
+
+			const restored = openDb(targetDb, { readonly: true });
+			const repos = new Repos(restored);
+			expect(repos.devices.get("dev-atomic-backup")).toBeDefined();
+			expect(repos.devices.get("dev-atomic-prev")).toBeUndefined();
+			restored.close();
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

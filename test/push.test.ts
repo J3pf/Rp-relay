@@ -620,3 +620,130 @@ describe("canal directo", () => {
 		direct.close();
 	});
 });
+
+describe("redacted agent enforcement (C-01)", () => {
+	it("Summaries.agent and Summaries.archived suppress lastMessagePreview and activeTask when redacted === 1", async () => {
+		const m = await pairMachine(t);
+		const agent = await connectAgent(t, m, "redacted-summary", {
+			redacted: true,
+			status: "working",
+		});
+		agent.client.send("agent.snapshot", {
+			epoch: agent.hello.epoch,
+			seq: 1,
+			entries: [{ kind: "assistant", at: Date.now(), msg: { role: "assistant", content: "Secret snapshot text" } }],
+			truncated: false,
+		});
+		agent.event({ type: "message_end", message: { role: "assistant", content: "Secret event preview" } });
+		agent.client.send("agent.status", { status: "working", detail: "Secret active task" });
+		await sleep(150);
+
+		const rowBeforeForce = t.relay.ctx.repos.agents.get(agent.agentId)!;
+		expect(rowBeforeForce.redacted).toBe(1);
+		expect(rowBeforeForce.last_preview).toBeNull();
+
+		// Even if last_preview is populated directly in SQLite, Summaries must still suppress it
+		t.relay.ctx.repos.agents.setPreview(agent.agentId, "Secret persisted preview");
+		const row = t.relay.ctx.repos.agents.get(agent.agentId)!;
+		const summary = t.relay.ctx.summaries.agent(row);
+		expect(summary.redacted).toBe(true);
+		expect(summary.lastMessagePreview).toBeNull();
+		expect(summary.activeTask).toBeUndefined();
+		expect("activeTask" in summary).toBe(false);
+
+		agent.client.close();
+		await sleep(50);
+		expect(t.relay.ctx.agents.archive(agent.agentId)).toBe(true);
+		const archivedRow = t.relay.ctx.repos.agents.get(agent.agentId)!;
+		const archivedSummaries = t.relay.ctx.summaries.archived([archivedRow]);
+		expect(archivedSummaries).toHaveLength(1);
+		expect(archivedSummaries[0]!.lastMessagePreview).toBeNull();
+	});
+
+	it("PushDispatcher masks prompt, settled, error, and terminal_wait fields with redacted: true", async () => {
+		const dev = await pairDevice(t);
+		await enableFcm(dev, "fcm-redacted-1", true);
+		const m = await pairMachine(t, "devbox", { name: "Work PC", context: "work" });
+		const agent = await connectAgent(t, m, "redacted-push", {
+			redacted: true,
+			session: { id: "redacted-push", file: null, name: "Private Session" },
+		});
+		const { client: direct } = await connectApp(t, dev, "direct");
+
+		const p = promptBody(agent.agentId, {
+			title: "Run secret command",
+			message: "cat /etc/shadow",
+			options: [
+				{ id: "0", label: "Allow secret" },
+				{ id: "1", label: "Deny secret" },
+			],
+			allowFreeText: true,
+		});
+		agent.client.send("prompt.open", p);
+		const directPrompt = await direct.next((e) => e.t === "push.notify" && (e.d as any).k === "prompt");
+		await sleep(150);
+
+		const fcmPrompt = t.fcm.sent.find((x) => x.data.k === "prompt")!;
+		expect(fcmPrompt).toBeDefined();
+		const promptPayload = JSON.parse(decryptPush(dev.pushKey, { n: fcmPrompt.data.n!, c: fcmPrompt.data.c! }));
+		expect(promptPayload).toMatchObject({
+			promptId: p.promptId,
+			agentId: agent.agentId,
+			agentLabel: "Private Session",
+			title: "Private Session",
+			message: null,
+			options: [],
+			allowFreeText: false,
+			redacted: true,
+		});
+		expect((directPrompt.d as any).body).toMatchObject({
+			title: "Private Session",
+			message: null,
+			options: [],
+			allowFreeText: false,
+			redacted: true,
+		});
+
+		// Trigger settled directly with a non-null preview to verify PushDispatcher masks it itself
+		t.relay.ctx.dispatcher.settled(agent.agentId, "Secret assistant reply");
+		const directSettled = await direct.next((e) => e.t === "push.notify" && (e.d as any).k === "settled");
+		await sleep(100);
+		const fcmSettled = t.fcm.sent.find((x) => x.data.k === "settled")!;
+		expect(JSON.parse(decryptPush(dev.pushKey, { n: fcmSettled.data.n!, c: fcmSettled.data.c! }))).toMatchObject({
+			agentId: agent.agentId,
+			agentLabel: "Private Session",
+			preview: null,
+			redacted: true,
+		});
+		expect((directSettled.d as any).body).toMatchObject({ preview: null, redacted: true });
+
+		// Error event
+		agent.client.send("agent.status", { status: "error", detail: "Secret stack trace" });
+		const directError = await direct.next((e) => e.t === "push.notify" && (e.d as any).k === "error");
+		await sleep(100);
+		const fcmError = t.fcm.sent.find((x) => x.data.k === "error")!;
+		expect(JSON.parse(decryptPush(dev.pushKey, { n: fcmError.data.n!, c: fcmError.data.c! }))).toMatchObject({
+			agentId: agent.agentId,
+			agentLabel: "Private Session",
+			detail: null,
+			redacted: true,
+		});
+		expect((directError.d as any).body).toMatchObject({ detail: null, redacted: true });
+
+		// Terminal wait event
+		agent.event({ type: "terminal_wait", kind: "custom", title: "Secret TUI question", active: true });
+		const directWait = await direct.next((e) => e.t === "push.notify" && (e.d as any).k === "terminal_wait");
+		await sleep(100);
+		const fcmWait = t.fcm.sent.find((x) => x.data.k === "terminal_wait")!;
+		expect(JSON.parse(decryptPush(dev.pushKey, { n: fcmWait.data.n!, c: fcmWait.data.c! }))).toMatchObject({
+			agentId: agent.agentId,
+			agentLabel: "Private Session",
+			title: null,
+			redacted: true,
+		});
+		expect((directWait.d as any).body).toMatchObject({ title: null, redacted: true });
+
+		agent.client.close();
+		direct.close();
+	});
+});
