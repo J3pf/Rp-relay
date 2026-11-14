@@ -7,6 +7,17 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-14
+
+### Añadido / Seguridad y Privacidad
+- **Control estricto de `redacted` en resúmenes y pushes**: Oculta `lastMessagePreview`, `activeTask`, títulos de prompts, opciones y detalles de error en `Summaries`, `AgentService` y `PushDispatcher` cuando `agent.redacted === 1`, marcando el payload con `redacted: true`.
+- **Hardening de límites de autenticación y rate-limiting**: Restringe `trustProxy` a saltos loopback, limita fallos de upgrade WebSocket por fallo de auth, aplica rate-limit a `POST /v1/pair/codes` con tope por `kind`, falla cerrado en `/admin` cuando falta IP remota y sanea MIME/cuota total de blobs junto con permisos `0o600`/`0o700` en `rp-relay init`.
+
+### Corregido: Resiliencia de pushes, ciclo de vida y backups
+- **Pool HTTP/2 y validación temprana de APNs**: Reutiliza sesiones HTTP/2 por autoridad en `ApnsHttp2Client` con listeners persistentes de error, valida la clave `.p8` al arranque, drena sesiones en `Relay.stop()` y expone estado APNs en `admin/status`, `doctor`, `devices list` y `push test`.
+- **Ciclo de vida de prompts, agentes y RPCs**: Incluye prompts `'answered'` en desconexión/arranque/expiración/archivo, cierra `AgentConn` activas al archivar, agrega `"done"` a `AGENT_STATUSES`, rechaza waiters/RPCs en vuelo ante desconexión o reemplazo en `MessageService`/`HostService` y evita carreras en `LongPollConn.waiter`.
+- **Backups atómicos y consistencia de malla/SQLite**: Propaga errores no-`ECONNREFUSED` en `rp-relay restore` sin `--force`, realiza restauración atómica (`tmp` + `0o600` + `renameSync`), envuelve `EventsRepo.prune()` en transacción y unifica `buildCommView` en `MeshService`.
+
 ## [0.8.1] - 2026-11-12
 
 ### Añadido: estado `done` y telemetría de contexto en protocolo
