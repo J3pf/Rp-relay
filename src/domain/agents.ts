@@ -3,6 +3,7 @@ import {
 	type AgentHello,
 	type AgentSnapshot,
 	type ArchivedAgentSummary,
+	CloseCode,
 	CommEvent,
 	envelope,
 	isDroppableEvent,
@@ -69,7 +70,8 @@ export class AgentService {
 		conn.lastSeq = epochChanged ? 0 : previousSeq;
 		conn.lastTouchAt = epochChanged ? now : (row.last_seen_at ?? 0);
 		repos.machines.touch(machine.id, now);
-		hub.registerAgent(conn as AgentConn & { agentId: string });
+		const prev = hub.registerAgent(conn as AgentConn & { agentId: string });
+		if (prev) this.c().messages.onAgentDisconnected(h.agentId);
 		mesh.invalidate();
 
 		const pendingAnswers = repos.prompts.pendingAnswers(h.agentId).flatMap((p) => {
@@ -110,12 +112,13 @@ export class AgentService {
 	}
 
 	onSnapshot(conn: AgentConn, s: AgentSnapshot): void {
-		const { repos, publisher, mesh } = this.c();
-		if (!conn.agentId) return;
+		const { repos, hub, publisher, mesh } = this.c();
+		if (!conn.agentId || hub.agents.get(conn.agentId) !== conn) return;
 		if (s.epoch !== conn.epoch) this.switchEpoch(conn, s.epoch);
 		repos.events.putSnapshot(conn.agentId, s.epoch, s.seq, { entries: s.entries, truncated: s.truncated ?? false });
 		conn.lastSeq = Math.max(conn.lastSeq, s.seq);
 		repos.agents.setSeq(conn.agentId, s.seq);
+		const redacted = repos.agents.get(conn.agentId)?.redacted === 1;
 		let maxAt =
 			typeof s.lastActivityAt === "number" && Number.isFinite(s.lastActivityAt) ? Math.floor(s.lastActivityAt) : 0;
 		let latestPreview: string | null = null;
@@ -123,7 +126,7 @@ export class AgentService {
 			if (typeof entry.at === "number" && Number.isFinite(entry.at) && entry.at > maxAt) {
 				maxAt = Math.floor(entry.at);
 			}
-			if (entry.kind === "assistant" && entry.msg) {
+			if (!redacted && entry.kind === "assistant" && entry.msg) {
 				const pv = previewOf({ message: entry.msg });
 				if (pv) latestPreview = pv;
 			}
@@ -133,7 +136,7 @@ export class AgentService {
 			conn.lastTouchAt = clampedAt;
 			repos.agents.touch(conn.agentId, clampedAt);
 		}
-		if (latestPreview) {
+		if (latestPreview && !redacted) {
 			repos.agents.setPreview(conn.agentId, latestPreview);
 		}
 		mesh.invalidate();
@@ -176,7 +179,7 @@ export class AgentService {
 	onEvent(conn: AgentConn, ev: AgentEvent): void {
 		const { repos, hub, dispatcher, publisher } = this.c();
 		const agentId = conn.agentId;
-		if (!agentId) return;
+		if (!agentId || hub.agents.get(agentId) !== conn) return;
 		if (ev.epoch !== conn.epoch) this.switchEpoch(conn, ev.epoch);
 		if (ev.seq <= conn.lastSeq) return; // reenvío (al menos una vez): ya visto
 		const e = ev.e as { type: string; [k: string]: unknown };
@@ -250,7 +253,7 @@ export class AgentService {
 				}
 				case "message_end": {
 					const pv = previewOf(e);
-					if (pv) {
+					if (pv && repos.agents.get(agentId)?.redacted !== 1) {
 						repos.agents.setPreview(agentId, pv);
 						agentChanged = true;
 					}
@@ -294,8 +297,8 @@ export class AgentService {
 		if (!inserted) return;
 
 		if (storedComm) {
-			this.c().mesh.invalidate();
 			this.c().mesh.onComm(storedComm);
+			this.c().mesh.invalidate();
 		} else if (agentChanged || e.type === "todo_update" || e.type === "subagent_update") {
 			this.c().mesh.invalidate();
 		}
@@ -307,6 +310,7 @@ export class AgentService {
 			const active = e.active === true;
 			hub.broadcastApps(envelope("terminal_wait", { agentId, kind: e.kind as string | undefined, title, active }));
 			if (active) dispatcher.terminalWait(agentId, title);
+			else dispatcher.terminalWaitCleared(agentId);
 		}
 
 		const out = envelope("agent.event", { agentId, epoch: ev.epoch, seq: ev.seq, e });
@@ -316,8 +320,8 @@ export class AgentService {
 	}
 
 	onStatus(conn: AgentConn, d: { status: string; detail?: string | null }): void {
-		const { repos, dispatcher, publisher, mesh } = this.c();
-		if (!conn.agentId) return;
+		const { repos, hub, dispatcher, publisher, mesh } = this.c();
+		if (!conn.agentId || hub.agents.get(conn.agentId) !== conn) return;
 		const prev = repos.agents.get(conn.agentId)?.status;
 		repos.agents.setStatus(conn.agentId, d.status, d.detail ?? null);
 		mesh.invalidate();
@@ -326,8 +330,8 @@ export class AgentService {
 	}
 
 	onStatuses(conn: AgentConn, items: Record<string, string | null>): void {
-		const { repos, publisher, mesh } = this.c();
-		if (!conn.agentId) return;
+		const { repos, hub, publisher, mesh } = this.c();
+		if (!conn.agentId || hub.agents.get(conn.agentId) !== conn) return;
 		const raw = items["gentle:mode"];
 		let mode: string | null = null;
 		if (typeof raw === "string") {
@@ -341,10 +345,11 @@ export class AgentService {
 
 	/** Cierre de la conexión del agente. */
 	disconnect(conn: AgentConn): void {
-		const { repos, hub, publisher, config, mesh } = this.c();
+		const { repos, hub, publisher, config, mesh, messages } = this.c();
 		const agentId = conn.agentId;
 		if (!agentId) return;
 		if (!hub.unregisterAgent(conn)) return; // fue reemplazada por otra conexión: nada que hacer
+		messages.onAgentDisconnected(agentId);
 		if (!repos.db.open) return;
 		this.c().log.info({ agentId, machineId: conn.machineId }, "agente desconectado");
 		repos.agents.setSeq(agentId, conn.lastSeq);
@@ -352,8 +357,9 @@ export class AgentService {
 		mesh.invalidate();
 		publisher.agent(agentId);
 		publisher.machine(conn.machineId);
-		// los prompts abiertos se conservan una ventana de gracia por si el plugin reconecta
-		if (repos.prompts.openForAgent(agentId).length > 0) this.armGrace(agentId, config.limits.promptGraceSeconds * 1000);
+		// los prompts abiertos o respondidos sin entregar se conservan una ventana de gracia por si el plugin reconecta
+		if (repos.prompts.openForAgent(agentId, ["open", "answered"]).length > 0)
+			this.armGrace(agentId, config.limits.promptGraceSeconds * 1000);
 	}
 
 	armGrace(agentId: string, ms: number): void {
@@ -362,7 +368,7 @@ export class AgentService {
 			this.graceTimers.delete(agentId);
 			const { hub, prompts } = this.c();
 			if (hub.agents.has(agentId)) return;
-			prompts.cancelOpenOfAgent(agentId);
+			prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
 		}, ms);
 		t.unref();
 		this.graceTimers.set(agentId, t);
@@ -374,11 +380,11 @@ export class AgentService {
 		this.graceTimers.delete(agentId);
 	}
 
-	/** Al arrancar el relay: todos quedan offline y los prompts abiertos arrancan su ventana de gracia. */
+	/** Al arrancar el relay: todos quedan offline y los prompts abiertos o respondidos arrancan su ventana de gracia. */
 	boot(): void {
 		const { repos, config } = this.c();
 		repos.agents.setAllOffline(Date.now());
-		const ids = new Set(repos.prompts.list(["open"]).map((p) => p.agent_id));
+		const ids = new Set(repos.prompts.list(["open", "answered"]).map((p) => p.agent_id));
 		for (const id of ids) this.armGrace(id, config.limits.promptGraceSeconds * 1000);
 	}
 
@@ -444,15 +450,23 @@ export class AgentService {
 		if (agent.archived_at === null) throw new RelayError("conflict", "solo se puede purgar un agente archivado");
 
 		this.clearGrace(agentId);
+		hub.clearAgentSubscribers(agentId);
 		repos.agents.delete(agentId);
 		messages.forget(agentId);
 		mesh.invalidate();
 	}
 
 	archive(agentId: string): boolean {
-		const { repos, publisher, prompts, mesh } = this.c();
+		const { repos, hub, publisher, prompts, mesh, messages } = this.c();
 		const a = repos.agents.get(agentId);
 		if (!a || !repos.agents.archive(agentId, Date.now())) return false;
+		const live = hub.agents.get(agentId);
+		if (live) {
+			hub.unregisterAgent(live);
+			live.close(CloseCode.Normal, "agent archived");
+		}
+		hub.clearAgentSubscribers(agentId);
+		messages.forget(agentId);
 		this.clearGrace(agentId);
 		prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
 		mesh.invalidate();

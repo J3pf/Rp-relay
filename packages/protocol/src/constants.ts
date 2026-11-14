@@ -57,6 +57,6 @@ export const DROPPABLE_EVENT_TYPES = ["message_delta", "tool_execution_update", 
 const droppable = new Set<string>(DROPPABLE_EVENT_TYPES);
 export const isDroppableEvent = (type: string): boolean => droppable.has(type);
 
-export const AGENT_STATUSES = ["idle", "working", "waiting_input", "compacting", "error"] as const;
+export const AGENT_STATUSES = ["idle", "working", "waiting_input", "compacting", "error", "done"] as const;
 export const NOTIFY_CATEGORIES = ["permission", "question", "settled", "error", "terminal_wait"] as const;
 export type NotifyCategory = (typeof NOTIFY_CATEGORIES)[number];

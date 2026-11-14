@@ -38,8 +38,9 @@ class WsAppConn extends WsConn implements AppConn {
 		socket: WebSocket,
 		readonly deviceId: string,
 		readonly mode: "foreground" | "direct",
+		hardBufferedBytes?: number,
 	) {
-		super(socket);
+		super(socket, hardBufferedBytes);
 	}
 }
 
@@ -110,6 +111,11 @@ export class AppSession {
 		switch (env.t) {
 			case "app.hello": {
 				const d = env.d as Static<typeof AppHello>;
+				if (repos.devices.get(this.device.id)?.revoked_at) {
+					this.conn.send(errorEnvelope(ErrorCode.Unauthorized, "dispositivo revocado", env.id));
+					this.conn.close(CloseCode.Unauthorized, "device revoked");
+					return;
+				}
 				if (d.deviceId !== this.device.id) {
 					this.conn.send(errorEnvelope(ErrorCode.Unauthorized, "deviceId no coincide con el token", env.id));
 					this.conn.close(CloseCode.Unauthorized, "device mismatch");
@@ -246,6 +252,7 @@ export class AppSession {
 	}
 
 	onClose(): void {
+		this.c().prompts.removeApp(this.conn);
 		this.c().hub.removeApp(this.conn);
 	}
 }
@@ -257,7 +264,7 @@ export function handleAppSocket(
 	device: DeviceRow,
 	mode: "foreground" | "direct",
 ): void {
-	const conn = new WsAppConn(socket, device.id, mode);
+	const conn = new WsAppConn(socket, device.id, mode, c().config.limits.hardBufferedBytes);
 	const session = new AppSession(c, conn, device);
 	const { hub, log } = c();
 	hub.addApp(conn);

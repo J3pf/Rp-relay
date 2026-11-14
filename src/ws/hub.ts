@@ -87,6 +87,10 @@ export class Hub {
 			if (set.size === 0) this.subsByAgent.delete(agentId);
 		}
 	}
+	clearAgentSubscribers(agentId: string): void {
+		this.subsByAgent.delete(agentId);
+		for (const conn of this.apps) conn.subs.delete(agentId);
+	}
 	subscribeMesh(conn: AppConn, machineId: string | null): void {
 		this.meshSubs.set(conn, machineId);
 		this.notifyMeshSubscribersChanged();

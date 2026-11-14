@@ -173,7 +173,10 @@ export class Relay {
 		this.ws = attachWebSockets(this.app.server, () => ctx);
 		ctx.agents.boot();
 		await this.app.listen({ host: config.listen.host, port: config.listen.port });
-		log.info({ ...this.address, tls: this.tlsActive, fcm: ctx.dispatcher.fcmEnabled }, "rp-relay escuchando");
+		log.info(
+			{ ...this.address, tls: this.tlsActive, fcm: ctx.dispatcher.fcmEnabled, apns: ctx.dispatcher.apnsEnabled },
+			"rp-relay escuchando",
+		);
 
 		if (!this.opts.noTimers) this.startTimers();
 		sdNotify("READY=1", `STATUS=escuchando en ${this.address.port}`);
@@ -248,8 +251,9 @@ export class Relay {
 	}
 
 	backup(): string {
-		const f = backupNow(this.db, backupsDir(this.config));
-		const pruned = pruneBackups(backupsDir(this.config), this.config.backup.keepDays);
+		const dir = backupsDir(this.config);
+		const pruned = pruneBackups(dir, this.config.backup.keepDays);
+		const f = backupNow(this.db, dir);
 		this.log.info({ file: f, pruned }, "copia de seguridad creada");
 		return f;
 	}
@@ -279,6 +283,7 @@ export class Relay {
 			ctx.messages.dispose();
 			ctx.mesh.dispose();
 			ctx.hosts.dispose();
+			ctx.dispatcher.close();
 		} finally {
 			try {
 				this.db.pragma("wal_checkpoint(TRUNCATE)");

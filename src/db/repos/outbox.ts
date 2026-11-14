@@ -15,6 +15,12 @@ export interface OutboxRow {
 export class OutboxRepo {
 	constructor(private db: DB) {}
 	insert(r: Omit<OutboxRow, "acked_at">): void {
+		if (r.ref_id !== null) {
+			stmt(
+				this.db,
+				"UPDATE push_outbox SET acked_at=? WHERE device_id=? AND kind=? AND ref_id=? AND acked_at IS NULL",
+			).run(r.created_at, r.device_id, r.kind, r.ref_id);
+		}
 		stmt(
 			this.db,
 			"INSERT OR IGNORE INTO push_outbox(push_id,device_id,kind,ref_id,body,created_at,expires_at) VALUES (?,?,?,?,?,?,?)",
@@ -31,9 +37,13 @@ export class OutboxRepo {
 	}
 	/** Cancela las entregas pendientes de un prompt (la notificación ya no hace falta) sin borrar los `cancel`. */
 	dropPromptDeliveries(promptId: string, now: number): void {
-		stmt(this.db, "UPDATE push_outbox SET acked_at=? WHERE ref_id=? AND kind='prompt' AND acked_at IS NULL").run(
+		this.dropByRefAndKind(promptId, "prompt", now);
+	}
+	dropByRefAndKind(refId: string, kind: string, now: number): void {
+		stmt(this.db, "UPDATE push_outbox SET acked_at=? WHERE ref_id=? AND kind=? AND acked_at IS NULL").run(
 			now,
-			promptId,
+			refId,
+			kind,
 		);
 	}
 	pendingFor(deviceId: string, now: number): OutboxRow[] {

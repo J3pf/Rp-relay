@@ -41,7 +41,7 @@ export class PromptsRepo {
 		return (
 			stmt(
 				this.db,
-				"UPDATE prompts SET state='open', resolved_at=NULL, resolved_by=NULL, answer=NULL, payload=?, expires_at=? WHERE id=? AND state IN ('cancelled','expired') AND resolved_by='relay_grace'",
+				"UPDATE prompts SET state='open', resolved_at=NULL, resolved_by=NULL, answer=NULL, answered_by_device=NULL, answered_at=NULL, push_attempts=0, payload=?, expires_at=? WHERE id=? AND state IN ('cancelled','expired') AND resolved_by='relay_grace'",
 			).run(JSON.stringify(p), p.expiresAt ?? null, id).changes > 0
 		);
 	}
@@ -100,9 +100,10 @@ export class PromptsRepo {
 		) as PromptRow[];
 	}
 	expiredOpen(now: number): PromptRow[] {
-		return stmt(this.db, "SELECT * FROM prompts WHERE state='open' AND expires_at IS NOT NULL AND expires_at<=?").all(
-			now,
-		) as PromptRow[];
+		return stmt(
+			this.db,
+			"SELECT * FROM prompts WHERE state IN ('open','answered') AND expires_at IS NOT NULL AND expires_at<=?",
+		).all(now) as PromptRow[];
 	}
 	/** Prompts `danger=high` abiertos que toca volver a notificar (a los 5 y 10 min; máx. 3 envíos). */
 	repushDue(now: number, intervalMs: number, maxAttempts: number): PromptRow[] {

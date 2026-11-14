@@ -20,6 +20,7 @@ export class Publisher {
 		const directSig = JSON.stringify([
 			s.status,
 			s.activeTask,
+			isWorking ? s.lastMessagePreview : null,
 			s.online,
 			s.openPromptCount,
 			s.sessionName,

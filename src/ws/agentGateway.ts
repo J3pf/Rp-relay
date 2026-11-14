@@ -87,6 +87,11 @@ export class AgentSession {
 		switch (env.t) {
 			case "agent.hello": {
 				const h = env.d as AgentHello;
+				if (ctx.repos.machines.get(this.machine.id)?.revoked_at) {
+					this.conn.send(errorEnvelope(ErrorCode.Unauthorized, "PC revocada", env.id));
+					this.conn.close(CloseCode.Unauthorized, "machine revoked");
+					return;
+				}
 				if (this.helloDone && this.conn.agentId !== h.agentId) {
 					this.conn.close(CloseCode.InvalidFrame, "agentId changed");
 					return;
@@ -141,7 +146,7 @@ export class AgentSession {
 
 /** Gateway WS `/ws/agent`. */
 export function handleAgentSocket(c: () => Ctx, socket: WebSocket, machine: MachineRow): void {
-	const conn = Object.assign(new WsConn(socket), {
+	const conn = Object.assign(new WsConn(socket, c().config.limits.hardBufferedBytes), {
 		transport: "ws" as const,
 		agentId: null as string | null,
 		machineId: machine.id,

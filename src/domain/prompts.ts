@@ -56,7 +56,6 @@ export class PromptService {
 			{ promptId, agentId: row.agent_id, deviceId, agentOnline: hub.agents.has(row.agent_id) },
 			"prompt respondido desde la app",
 		);
-		this.answerReqs.set(promptId, { conn: via.conn ?? null, reqId: via.reqId, deviceId });
 		const agentConn = hub.agents.get(row.agent_id);
 		if (!agentConn) {
 			// La respuesta espera a que el agente vuelva, pero la notificación ya no hace falta en los
@@ -64,6 +63,7 @@ export class PromptService {
 			this.c().dispatcher.promptCancelled(promptId, deviceId);
 			return { ok: true, queued: true };
 		}
+		this.answerReqs.set(promptId, { conn: via.conn ?? null, reqId: via.reqId, deviceId });
 		agentConn.send(envelope("prompt.answer", { promptId, answer, deviceId }));
 		return { ok: true, queued: false };
 	}
@@ -164,14 +164,20 @@ export class PromptService {
 		return { expired, repushed };
 	}
 
-	/** Cancela los prompts abiertos de un agente (tras la ventana de gracia sin reconexión o revocación). */
-	cancelOpenOfAgent(agentId: string, states: PromptState[] = ["open"]): number {
+	/** Cancela los prompts abiertos o respondidos sin entregar de un agente (tras la ventana de gracia sin reconexión o revocación). */
+	cancelOpenOfAgent(agentId: string, states: PromptState[] = ["open", "answered"]): number {
 		let n = 0;
 		for (const row of this.c().repos.prompts.openForAgent(agentId, states)) {
 			this.cancelByRelay(row, "grace");
 			n++;
 		}
 		return n;
+	}
+
+	removeApp(conn: AppConn): void {
+		for (const [id, req] of this.answerReqs) {
+			if (req.conn === conn) this.answerReqs.delete(id);
+		}
 	}
 
 	/** Expira respuestas 'answered' sin entregar pasadas `before` y notifica a las apps. */

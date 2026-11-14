@@ -19,7 +19,10 @@ const KEEP = 500;
 export class MessageService {
 	private done = new Map<string, Map<string, UserMessageAck>>();
 	private pending = new Map<string, Promise<UserMessageAck>>();
-	private waiters = new Map<string, { resolve: (a: UserMessageAck) => void; timer: NodeJS.Timeout }>();
+	private waiters = new Map<
+		string,
+		{ agentId: string; resolve: (a: UserMessageAck) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
+	>();
 
 	constructor(private c: () => Ctx) {}
 
@@ -56,7 +59,7 @@ export class MessageService {
 				reject(new RelayError("agent_timeout", "el agente no confirmó el mensaje a tiempo"));
 			}, config.limits.userMessageTimeoutMs);
 			timer.unref();
-			this.waiters.set(k, { resolve, timer });
+			this.waiters.set(k, { agentId: m.agentId, resolve, reject, timer });
 		});
 		this.pending.set(k, p);
 		const ok = conn.send(
@@ -116,7 +119,18 @@ export class MessageService {
 		conn.send(envelope("agent.abort", {}));
 	}
 
+	onAgentDisconnected(agentId: string): void {
+		for (const [k, w] of this.waiters) {
+			if (w.agentId !== agentId) continue;
+			clearTimeout(w.timer);
+			this.waiters.delete(k);
+			this.pending.delete(k);
+			w.reject(new RelayError("agent_offline", "el agente se desconectó"));
+		}
+	}
+
 	forget(agentId: string): void {
+		this.onAgentDisconnected(agentId);
 		this.done.delete(agentId);
 	}
 

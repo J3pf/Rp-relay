@@ -151,7 +151,7 @@ describe("resiliencia: red", () => {
 		app.send("user.message", { agentId: agent.agentId, clientMsgId: "NET1", text: "hola" });
 		const first = await agent.client.next("user.message");
 		agent.client.terminate(); // se corta antes de acusar recibo
-		await app.next("error", 2000).then((e) => expect(e.d).toMatchObject({ code: "agent_timeout" }));
+		await app.next("error", 2000).then((e) => expect(e.d).toMatchObject({ code: "agent_offline" }));
 		const { c } = await reconnectAgent(t, m, { ...agent.hello, instance: "I2" });
 		app.send("user.message", { agentId: agent.agentId, clientMsgId: "NET1", text: "hola" });
 		const again = await c.next("user.message");

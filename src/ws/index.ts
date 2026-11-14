@@ -51,7 +51,10 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 			socket.write(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
 			socket.destroy();
 		};
-		const remoteIp = req.socket.remoteAddress ?? "unknown";
+		const rawRemote = req.socket.remoteAddress ?? "unknown";
+		const isLoopback = rawRemote === "127.0.0.1" || rawRemote === "::1" || rawRemote === "::ffff:127.0.0.1";
+		const xff = typeof req.headers["x-forwarded-for"] === "string" ? req.headers["x-forwarded-for"] : "";
+		const remoteIp = isLoopback && xff ? xff.split(",")[0]?.trim() || rawRemote : rawRemote;
 		switch (url.pathname) {
 			case "/ws/agent": {
 				const auth = ctx.auth.machine(req.headers);

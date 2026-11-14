@@ -23,7 +23,7 @@ export class LongPollConn implements AgentConn {
 
 	send(env: Envelope): boolean {
 		if (this.closed) return false;
-		const encodedBytes = JSON.stringify(env).length;
+		const encodedBytes = Buffer.byteLength(JSON.stringify(env), "utf8");
 		if (this.bytes + encodedBytes > this.hardBufferedBytes) {
 			this.queue = [];
 			this.bytes = 0;
@@ -67,6 +67,7 @@ export class LongPollConn implements AgentConn {
 				let timer: NodeJS.Timeout | undefined;
 				const done = () => {
 					if (timer) clearTimeout(timer);
+					if (this.waiter === done) this.waiter = null;
 					signal?.removeEventListener("abort", done);
 					resolve();
 				};
@@ -74,7 +75,6 @@ export class LongPollConn implements AgentConn {
 				this.waiter = done;
 				signal?.addEventListener("abort", done, { once: true });
 			});
-			this.waiter = null;
 		}
 		if (signal?.aborted) return { messages: [] };
 		const after = Date.now();

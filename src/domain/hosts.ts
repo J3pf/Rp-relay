@@ -16,6 +16,7 @@ type HostRequestResult = { ok: true; d: any } | { ok: false; code: string; messa
 
 interface PendingReq {
 	conn?: AppConn;
+	hostConn?: HostConn;
 	machineId: string;
 	reqEnvId: string | undefined;
 	timer: NodeJS.Timeout;
@@ -59,7 +60,8 @@ export class HostService {
 		repos.machines.setHostInfo(conn.machineId, hello);
 		repos.machines.setQuotas(conn.machineId, Array.isArray(hello.quotas) ? hello.quotas : null);
 		repos.machines.touch(conn.machineId, Date.now());
-		hub.registerHost(conn);
+		const prev = hub.registerHost(conn);
+		if (prev) this.cancelPendingForHostConn(prev);
 		publisher.host(conn.machineId);
 		publisher.machine(conn.machineId);
 	}
@@ -86,6 +88,16 @@ export class HostService {
 		const prefix = `${machineId}\u0000`;
 		for (const k of this.held.keys()) if (k.startsWith(prefix)) this.held.delete(k);
 		for (const k of this.unclaimed.keys()) if (k.startsWith(prefix)) this.unclaimed.delete(k);
+	}
+
+	private cancelPendingForHostConn(hostConn: HostConn): void {
+		for (const [id, p] of this.pending) {
+			if (p.hostConn !== hostConn) continue;
+			clearTimeout(p.timer);
+			this.pending.delete(id);
+			if (p.resolve) p.resolve({ ok: false, code: ErrorCode.HostOffline, message: "el host fue reemplazado" });
+			else p.conn?.send(errorEnvelope(ErrorCode.HostOffline, "el host fue reemplazado", p.reqEnvId));
+		}
 	}
 
 	private cancelPendingForMachine(machineId: string): void {
@@ -119,7 +131,7 @@ export class HostService {
 			(HOST_FORWARD[env.t] ?? 1) * this.c().config.limits.hostRequestTimeoutMs,
 		);
 		timer.unref();
-		const req: PendingReq = { conn: app, machineId, reqEnvId: env.id, timer };
+		const req: PendingReq = { conn: app, hostConn: host, machineId, reqEnvId: env.id, timer };
 		if (env.t === "host.spawn" && typeof d.initialPrompt === "string" && d.initialPrompt)
 			req.initialPrompt = d.initialPrompt;
 		this.pending.set(id, req);
@@ -153,7 +165,7 @@ export class HostService {
 					(HOST_FORWARD[t] ?? 1) * this.c().config.limits.hostRequestTimeoutMs,
 				);
 				timer.unref();
-				this.pending.set(id, { machineId, reqEnvId: undefined, timer, resolve });
+				this.pending.set(id, { hostConn: host, machineId, reqEnvId: undefined, timer, resolve });
 				if (!host.send(envelope(t, d, { id }))) {
 					clearTimeout(timer);
 					this.pending.delete(id);

@@ -18,14 +18,15 @@ class WsHostConn extends WsConn implements HostConn {
 	constructor(
 		socket: WebSocket,
 		readonly machineId: string,
+		hardBufferedBytes?: number,
 	) {
-		super(socket);
+		super(socket, hardBufferedBytes);
 	}
 }
 
 /** Gateway WS `/ws/host` (rp-host, PROTOCOLO §9). */
 export function handleHostSocket(c: () => Ctx, socket: WebSocket, machine: MachineRow): void {
-	const conn = new WsHostConn(socket, machine.id);
+	const conn = new WsHostConn(socket, machine.id, c().config.limits.hardBufferedBytes);
 	const { log, hosts } = c();
 	startHeartbeat(socket);
 
@@ -48,6 +49,11 @@ export function handleHostSocket(c: () => Ctx, socket: WebSocket, machine: Machi
 		}
 		if (env.t === "host.hello") {
 			const h = env.d as { machineId: string; hostname: string; roots: string[]; quotas?: MachineQuota[] };
+			if (c().repos.machines.get(machine.id)?.revoked_at) {
+				conn.send(errorEnvelope(ErrorCode.Unauthorized, "PC revocada", env.id));
+				conn.close(CloseCode.Unauthorized, "machine revoked");
+				return;
+			}
 			if (h.machineId !== machine.id) {
 				conn.send(errorEnvelope(ErrorCode.Unauthorized, "machineId no coincide con el token", env.id));
 				conn.close(CloseCode.Unauthorized, "machine mismatch");

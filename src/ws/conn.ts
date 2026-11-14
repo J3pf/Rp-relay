@@ -44,9 +44,16 @@ export interface HostConn extends Conn {
 
 export class WsConn implements Conn {
 	closed = false;
-	constructor(readonly socket: WebSocket) {}
+	constructor(
+		readonly socket: WebSocket,
+		private readonly hardBufferedBytes = Number.POSITIVE_INFINITY,
+	) {}
 	send(env: Envelope): boolean {
 		if (this.closed || this.socket.readyState !== WebSocket.OPEN) return false;
+		if (this.socket.bufferedAmount > this.hardBufferedBytes) {
+			this.close(CloseCode.TryAgainLater, "slow consumer");
+			return false;
+		}
 		try {
 			this.socket.send(JSON.stringify(env));
 			return true;
