@@ -119,28 +119,26 @@ export class CommsRepo {
 	}
 
 	listConversation(a: string, b: string, before?: number, limit = 50): CommRow[] {
-		const beforeClause = before === undefined ? "" : " AND at<?";
-		const params =
-			before === undefined ? [a, b, b, a, a, b, a, b, b, a, limit] : [a, b, b, a, a, b, a, b, b, a, before, limit];
+		const beforeClause = before === undefined ? "" : " AND at < @before";
 		return stmt(
 			this.db,
 			`SELECT * FROM comms
 			 WHERE (
-				(agent_id=? AND peer_agent_id=?)
-				OR (agent_id=? AND peer_agent_id=?)
+				(agent_id = @a AND peer_agent_id = @b)
+				OR (agent_id = @b AND peer_agent_id = @a)
 				OR (
-					agent_id IN (?, ?)
+					agent_id IN (@a, @b)
 					AND peer_agent_id IS NULL
 					AND message_id IS NOT NULL
 					AND EXISTS (
 						SELECT 1 FROM comms p
 						WHERE p.message_id = comms.message_id
-						  AND ((p.agent_id=? AND p.peer_agent_id=?) OR (p.agent_id=? AND p.peer_agent_id=?))
+						  AND ((p.agent_id = @a AND p.peer_agent_id = @b) OR (p.agent_id = @b AND p.peer_agent_id = @a))
 					)
 				)
 			 )${beforeClause}
-			 ORDER BY at DESC, comm_id DESC LIMIT ?`,
-		).all(...params) as CommRow[];
+			 ORDER BY at DESC, comm_id DESC LIMIT @limit`,
+		).all({ a, b, before, limit }) as CommRow[];
 	}
 
 	listByAgent(agentId: string, limit = 50): CommRow[] {

@@ -10,7 +10,7 @@ import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
 import type { CommRow } from "../../db/repos/comms.js";
-import { agentDisplayName } from "../../domain/agentNames.js";
+import { buildCommView } from "../../domain/mesh/service.js";
 import { deduplicateCommRows } from "../../domain/mesh/topology.js";
 import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
@@ -28,43 +28,16 @@ function toCommViews(comms: CommRow[], c: () => Ctx): CommView[] {
 	const snapshot = ctx.mesh.getSnapshot(null);
 	const nodesById = new Map(snapshot.nodes.map((node) => [node.agentId, node]));
 	const agentCache = new Map<string, ReturnType<typeof ctx.repos.agents.get>>();
-	const agent = (agentId: string | null) => {
-		if (agentId === null) return undefined;
+	const agent = (agentId: string) => {
 		if (!agentCache.has(agentId)) agentCache.set(agentId, ctx.repos.agents.get(agentId));
 		return agentCache.get(agentId);
 	};
-	return comms.map((comm) => {
-		const senderId = comm.direction === "out" ? comm.agent_id : comm.peer_agent_id;
-		const receiverId = comm.direction === "out" ? comm.peer_agent_id : comm.agent_id;
-		const sender = agent(senderId);
-		const receiver = agent(receiverId);
-		const senderCandidate = sender ?? {
-			session_name: comm.direction === "in" ? comm.peer_name : null,
-			session_id: comm.direction === "in" ? comm.peer_session_id : null,
-			cwd: comm.direction === "in" ? comm.peer_cwd : null,
-			id: senderId,
-		};
-		const receiverCandidate = receiver ?? {
-			session_name: comm.direction === "out" ? comm.peer_name : null,
-			session_id: comm.direction === "out" ? comm.peer_session_id : null,
-			cwd: comm.direction === "out" ? comm.peer_cwd : null,
-			id: receiverId,
-		};
-		const senderNode = senderId ? nodesById.get(senderId) : undefined;
-		const receiverNode = receiverId ? nodesById.get(receiverId) : undefined;
-		return {
-			commKey: comm.comm_id,
-			fromAgentId: senderId,
-			toAgentId: receiverId,
-			fromName: senderNode?.name ?? agentDisplayName(senderCandidate),
-			toName: receiverNode?.name ?? agentDisplayName(receiverCandidate),
-			action: comm.action,
-			text: sender?.redacted ? null : comm.text,
-			truncated: Boolean(comm.truncated),
-			at: comm.at,
-			groupId: senderNode?.groupId ?? receiverNode?.groupId ?? null,
-		};
-	});
+	return comms.map((comm) =>
+		buildCommView(comm, {
+			getAgent: agent,
+			getNode: (agentId) => nodesById.get(agentId),
+		}),
+	);
 }
 
 export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {

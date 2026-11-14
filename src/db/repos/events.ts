@@ -11,6 +11,7 @@ export interface EventRow {
 
 export class EventsRepo {
 	private putSnapshotTx?: (agentId: string, epoch: string, seq: number, payload: string) => void;
+	private pruneTx?: (olderThan: number, perAgent: number) => number;
 	constructor(private db: DB) {}
 	/** Devuelve true si se insertó (false = duplicado por reenvío). */
 	insert(agentId: string, epoch: string, seq: number, ts: number, type: string, payload: unknown): boolean {
@@ -74,34 +75,37 @@ export class EventsRepo {
 	}
 	/** Retención: por antigüedad y por cantidad por agente. Los agentes archivados se conservan hasta un purge explícito. */
 	prune(olderThan: number, perAgent: number): number {
-		const notArchived = "agent_id NOT IN (SELECT id FROM agents WHERE archived_at IS NOT NULL)";
-		const affectedAgents = new Set<string>();
-		for (const r of stmt(this.db, `SELECT DISTINCT agent_id FROM events WHERE ts<? AND ${notArchived}`).all(
-			olderThan,
-		) as {
-			agent_id: string;
-		}[]) {
-			affectedAgents.add(r.agent_id);
-		}
-		let n = stmt(this.db, `DELETE FROM events WHERE ts<? AND ${notArchived}`).run(olderThan).changes;
-		const over = stmt(
-			this.db,
-			`SELECT agent_id, COUNT(*) AS c FROM events WHERE ${notArchived} GROUP BY agent_id HAVING c>?`,
-		).all(perAgent) as { agent_id: string; c: number }[];
-		for (const o of over) {
-			affectedAgents.add(o.agent_id);
-			n += stmt(
+		this.pruneTx ??= this.db.transaction((olderThanTs: number, limitPerAgent: number) => {
+			const notArchived = "agent_id NOT IN (SELECT id FROM agents WHERE archived_at IS NOT NULL)";
+			const affectedAgents = new Set<string>();
+			for (const r of stmt(this.db, `SELECT DISTINCT agent_id FROM events WHERE ts<? AND ${notArchived}`).all(
+				olderThanTs,
+			) as {
+				agent_id: string;
+			}[]) {
+				affectedAgents.add(r.agent_id);
+			}
+			let n = stmt(this.db, `DELETE FROM events WHERE ts<? AND ${notArchived}`).run(olderThanTs).changes;
+			const over = stmt(
 				this.db,
-				`DELETE FROM events WHERE agent_id=? AND rowid IN (
+				`SELECT agent_id, COUNT(*) AS c FROM events WHERE ${notArchived} GROUP BY agent_id HAVING c>?`,
+			).all(limitPerAgent) as { agent_id: string; c: number }[];
+			for (const o of over) {
+				affectedAgents.add(o.agent_id);
+				n += stmt(
+					this.db,
+					`DELETE FROM events WHERE agent_id=? AND rowid IN (
 					   SELECT rowid FROM events WHERE agent_id=? ORDER BY ts, seq LIMIT ?)`,
-			).run(o.agent_id, o.agent_id, o.c - perAgent).changes;
-		}
-		for (const agentId of affectedAgents) {
-			stmt(
-				this.db,
-				"UPDATE snapshots SET payload=json_set(payload, '$.truncated', json('true'), '$.pruned', json('true')) WHERE agent_id=?",
-			).run(agentId);
-		}
-		return n;
+				).run(o.agent_id, o.agent_id, o.c - limitPerAgent).changes;
+			}
+			for (const agentId of affectedAgents) {
+				stmt(
+					this.db,
+					"UPDATE snapshots SET payload=json_set(payload, '$.truncated', json('true'), '$.pruned', json('true')) WHERE agent_id=?",
+				).run(agentId);
+			}
+			return n;
+		});
+		return this.pruneTx(olderThan, perAgent);
 	}
 }

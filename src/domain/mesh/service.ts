@@ -12,6 +12,54 @@ const MAX_SEEN_MESSAGES = 20_000;
 
 type CachedSnapshot = { snapshot: MeshSnapshot; generatedAt: number };
 
+type CommProjectionAgent = {
+	id: string;
+	machine_id?: string | null;
+	session_name?: string | null;
+	session_id?: string | null;
+	cwd?: string | null;
+	redacted?: number | null;
+};
+
+export function buildCommView(
+	comm: CommRow,
+	deps: {
+		getAgent: (agentId: string) => CommProjectionAgent | undefined;
+		getNode: (agentId: string) => { name?: string | null; groupId?: string | null } | undefined;
+	},
+): CommView {
+	const senderId = comm.direction === "out" ? comm.agent_id : comm.peer_agent_id;
+	const receiverId = comm.direction === "out" ? comm.peer_agent_id : comm.agent_id;
+	const sender = senderId ? deps.getAgent(senderId) : undefined;
+	const receiver = receiverId ? deps.getAgent(receiverId) : undefined;
+	const senderCandidate = sender ?? {
+		session_name: comm.direction === "in" ? comm.peer_name : null,
+		session_id: comm.direction === "in" ? comm.peer_session_id : null,
+		cwd: comm.direction === "in" ? comm.peer_cwd : null,
+		id: senderId ?? comm.comm_id,
+	};
+	const receiverCandidate = receiver ?? {
+		session_name: comm.direction === "out" ? comm.peer_name : null,
+		session_id: comm.direction === "out" ? comm.peer_session_id : null,
+		cwd: comm.direction === "out" ? comm.peer_cwd : null,
+		id: receiverId ?? comm.comm_id,
+	};
+	const senderNode = senderId ? deps.getNode(senderId) : undefined;
+	const receiverNode = receiverId ? deps.getNode(receiverId) : undefined;
+	return {
+		commKey: comm.comm_id,
+		fromAgentId: senderId,
+		toAgentId: receiverId,
+		fromName: senderNode?.name ?? agentDisplayName(senderCandidate),
+		toName: receiverNode?.name ?? agentDisplayName(receiverCandidate),
+		action: comm.action,
+		text: sender?.redacted ? null : comm.text,
+		truncated: Boolean(comm.truncated),
+		at: comm.at,
+		groupId: senderNode?.groupId ?? receiverNode?.groupId ?? null,
+	};
+}
+
 export class MeshService {
 	private cache = new Map<string | null, CachedSnapshot>();
 	private updateTimer: NodeJS.Timeout | undefined;
@@ -121,7 +169,7 @@ export class MeshService {
 		if (!senderId || !receiverId) return;
 		const sender = repos.agents.get(senderId);
 		const receiver = repos.agents.get(receiverId);
-		if (!sender || !receiver) return;
+		if (!sender && !receiver) return;
 
 		const now = Date.now();
 		this.pruneSeen(now);
@@ -133,38 +181,22 @@ export class MeshService {
 		}
 		this.seenCommIds.set(commKey, now);
 		if (comm.message_id !== null) this.seenMessageIds.set(comm.message_id, now);
-		this.pruneSeen(now);
 
 		const subscribers = [...hub.meshSubscribers()].filter(
-			([, scope]) => scope === null || scope === sender.machine_id || scope === receiver.machine_id,
+			([, scope]) =>
+				scope === null || scope === sender?.machine_id || scope === receiver?.machine_id || scope === comm.machine_id,
 		);
 		if (subscribers.length === 0) return;
 
 		let snapshot = this.cache.get(null)?.snapshot;
-		let senderNode = snapshot?.nodes.find((node) => node.agentId === senderId);
-		let receiverNode = snapshot?.nodes.find((node) => node.agentId === receiverId);
-		if (!snapshot || !senderNode || !receiverNode) {
-			this.cache.delete(null);
+		if (!snapshot) {
 			snapshot = this.getSnapshot(null);
-			senderNode = snapshot.nodes.find((node) => node.agentId === senderId);
-			receiverNode = snapshot.nodes.find((node) => node.agentId === receiverId);
 		}
-		const groupId = senderNode?.groupId ?? receiverNode?.groupId ?? null;
-		const fromName = senderNode?.name ?? agentDisplayName(sender);
-		const toName = receiverNode?.name ?? agentDisplayName(receiver);
-
-		const commView: CommView = {
-			commKey: comm.comm_id,
-			fromAgentId: senderId,
-			toAgentId: receiverId,
-			fromName,
-			toName,
-			action: comm.action,
-			text: sender.redacted ? null : comm.text,
-			truncated: Boolean(comm.truncated),
-			at: comm.at,
-			groupId,
-		};
+		const commView = buildCommView(comm, {
+			getAgent: (agentId) =>
+				agentId === senderId ? sender : agentId === receiverId ? receiver : repos.agents.get(agentId),
+			getNode: (agentId) => snapshot.nodes.find((node) => node.agentId === agentId),
+		});
 		const message = envelope("mesh.comm", { comm: commView });
 		for (const [conn] of subscribers) {
 			if (!conn.ready) continue;
