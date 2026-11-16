@@ -10,12 +10,20 @@ Central HTTP/WebSocket relay server and push dispatcher for RemotePi. Bridges mo
 - **Testing**: Vitest (`vitest run`).
 - **Core Domain**:
   - `src/domain/`: Machines, Agents, Prompts, Messages, History, Hosts, Summaries, Publisher, and `mesh/` topology/comms.
-  - `src/push/`: Direct WebSocket push outbox, FCM HTTP v1 sender, AES-256-GCM encryption, and notification preferences.
+  - `src/push/`: Direct WebSocket push outbox, FCM HTTP v1 sender, APNs HTTP/2 sender, AES-256-GCM encryption, and notification preferences.
   - `src/http/`: REST routes for pairing, machines, agents, long-poll transport, attachments, mesh, admin, and health checks.
   - `src/ws/`: Real-time WebSocket hubs for client-relay (`/ws/app`), agent-relay (`/ws/agent`), and host-relay (`/ws/host`) communication.
-  - `src/db/`: SQLite schema migrations (`migrations/0001_init.sql`..`0006_agent_comms.sql`) and repositories.
+  - `src/db/` & `migrations/`: SQLite connection/migration runner (`src/db/index.ts`, `src/db/migrate.ts`, `src/db/repos/`) and append-only SQL migrations (`migrations/0001_init.sql`..`0006_apns_push.sql`).
   - `src/blobs/`, `src/backup/`, `src/tls/`: Attachment store & GC, SQLite `VACUUM INTO` backups/restore, and integrated TLS/ACME.
-  - `packages/protocol/`: Shared TypeBox protocol definitions (`@j3pf/rp-protocol`) and test fixtures.
+  - `packages/protocol/`: Canonical TypeBox protocol definitions (`@j3pf/rp-protocol`) and test fixtures (`packages/protocol/fixtures/`).
+
+## Sibling Repositories & Cross-Repo Contracts
+
+`Rp-relay` is the canonical owner of the wire protocol (`docs/PROTOCOLO.md` and `packages/protocol/fixtures/`). When working across the RemotePi system:
+
+- **Mobile Client ([`J3pf/Rp-app`](https://github.com/J3pf/Rp-app), sibling `../Rp-app`)**: Android & iOS Compose Multiplatform app. After changing schemas or fixtures in `packages/protocol/`, sync and verify in `Rp-app` using `./scripts/sync-fixtures.sh [../Rp-relay]` and its `:protocol:test` suite.
+- **Host Daemon & Pi Extension ([`J3pf/Rp-plugin`](https://github.com/J3pf/Rp-plugin), sibling `../Rp-plugin`)**: Mirrors the v1 contract in `src/shared/protocol.ts` and checks parity against `docs/PROTOCOLO.md` and fixtures (`npm run fixtures` / `test/contract.test.ts`).
+- **Distribution**: Packages are published via GitHub Releases tarballs and `ghcr.io/j3pf/rp-relay` containers (not public npm).
 
 ## Commands
 
