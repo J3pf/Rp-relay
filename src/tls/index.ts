@@ -1,7 +1,8 @@
 import { X509Certificate } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
+import { createSecureContext } from "node:tls";
 import type { Logger } from "pino";
 import type { Config } from "../config.js";
 import { DAY } from "../util/time.js";
@@ -12,6 +13,15 @@ export interface TlsMaterial {
 }
 
 export const RENEW_BEFORE_DAYS = 30;
+
+export function validateTlsPair(key: Buffer, cert: Buffer): boolean {
+	try {
+		createSecureContext({ key, cert });
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 export function certExpiry(certPem: string | Buffer): number {
 	return new X509Certificate(certPem).validToDate.getTime();
@@ -88,7 +98,11 @@ export class AcmeChallengeServer {
 	async close(): Promise<void> {
 		const s = this.server;
 		this.server = null;
-		if (s) await new Promise<void>((r) => s.close(() => r()));
+		if (!s) return;
+		const done = new Promise<void>((r) => s.close(() => r()));
+		s.closeIdleConnections?.();
+		s.closeAllConnections?.();
+		await done;
 	}
 }
 
@@ -107,7 +121,8 @@ export async function ensureAcmeCert(
 	const keyFile = join(dir, "domain.key");
 	if (!force && existsSync(certFile) && existsSync(keyFile)) {
 		const cert = readFileSync(certFile);
-		if (!needsRenewal(cert)) return { key: readFileSync(keyFile), cert };
+		const key = readFileSync(keyFile);
+		if (!needsRenewal(cert) && validateTlsPair(key, cert)) return { key, cert };
 	}
 	let mod: any;
 	try {
@@ -124,9 +139,10 @@ export async function ensureAcmeCert(
 		accountKey,
 	});
 	const [key, csr] = await acme.crypto.createCsr({ commonName: tls.acme.domain });
-	let cert: string;
+	let certBuf: Buffer;
+	let keyBuf: Buffer;
 	try {
-		cert = await client.auto({
+		const cert: string = await client.auto({
 			csr,
 			email: tls.acme.email,
 			termsOfServiceAgreed: true,
@@ -134,15 +150,31 @@ export async function ensureAcmeCert(
 			challengeCreateFn: async (_a: unknown, c: { token: string }, keyAuth: string) => challenge.set(c.token, keyAuth),
 			challengeRemoveFn: async (_a: unknown, c: { token: string }) => challenge.remove(c.token),
 		});
-		writeFileSync(certFile, cert, { mode: 0o600 });
-		writeFileSync(keyFile, key, { mode: 0o600 });
+		certBuf = Buffer.from(cert);
+		keyBuf = Buffer.from(key);
+		if (!validateTlsPair(keyBuf, certBuf)) {
+			throw new Error("el certificado y la clave ACME renovados no coinciden");
+		}
+		const certTmp = `${certFile}.tmp`;
+		const keyTmp = `${keyFile}.tmp`;
+		try {
+			writeFileSync(certTmp, certBuf, { mode: 0o600 });
+			writeFileSync(keyTmp, keyBuf, { mode: 0o600 });
+			renameSync(certTmp, certFile);
+			renameSync(keyTmp, keyFile);
+		} catch (writeErr) {
+			rmSync(certTmp, { force: true });
+			rmSync(keyTmp, { force: true });
+			throw writeErr;
+		}
 	} catch (e) {
 		if (existsSync(certFile) && existsSync(keyFile)) {
-			const existingCert = readFileSync(certFile);
 			try {
-				if (certExpiry(existingCert) > Date.now()) {
+				const existingCert = readFileSync(certFile);
+				const existingKey = readFileSync(keyFile);
+				if (certExpiry(existingCert) > Date.now() && validateTlsPair(existingKey, existingCert)) {
 					log.warn({ err: (e as Error).message }, "renovación ACME falló; utilizando certificado existente aún válido");
-					return { key: readFileSync(keyFile), cert: existingCert };
+					return { key: existingKey, cert: existingCert };
 				}
 			} catch {
 				// Certificado existente inválido, relanzar error original
@@ -150,7 +182,7 @@ export async function ensureAcmeCert(
 		}
 		throw e;
 	}
-	return { key: Buffer.from(key), cert: Buffer.from(cert) };
+	return { key: keyBuf, cert: certBuf };
 }
 
 export function loadFileTls(t: { cert: string; key: string }): TlsMaterial {

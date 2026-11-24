@@ -5,16 +5,23 @@ import { RelayError } from "../util/errors.js";
 import { BLOB_ID_RE } from "./store.js";
 
 export function registerBlobRoutes(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
-	app.post("/v1/blobs", { preHandler: auth.device }, async (req, reply) => {
-		const part = await req.file();
-		if (!part) throw new RelayError("bad_request", "falta el campo multipart 'file'");
-		const row = await c().blobs.save(part.file, {
-			name: part.filename,
-			mime: part.mimetype,
-			uploadedBy: req.device!.id,
-		});
-		return reply.code(201).send({ blobId: row.id, sha256: row.sha256, size: row.size, mime: row.mime });
-	});
+	app.post(
+		"/v1/blobs",
+		{
+			preHandler: auth.device,
+			config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+		},
+		async (req, reply) => {
+			const part = await req.file();
+			if (!part) throw new RelayError("bad_request", "falta el campo multipart 'file'");
+			const row = await c().blobs.save(part.file, {
+				name: part.filename,
+				mime: part.mimetype,
+				uploadedBy: req.device!.id,
+			});
+			return reply.code(201).send({ blobId: row.id, sha256: row.sha256, size: row.size, mime: row.mime });
+		},
+	);
 
 	app.get<{ Params: { id: string } }>("/v1/blobs/:id", { preHandler: auth.deviceOrMachine }, async (req, reply) => {
 		if (!BLOB_ID_RE.test(req.params.id)) throw new RelayError("not_found", "adjunto no encontrado");

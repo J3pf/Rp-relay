@@ -6,7 +6,8 @@ export type DB = Database.Database;
 
 export function openDb(path: string, opts: { readonly?: boolean } = {}): DB {
 	if (path !== ":memory:" && !opts.readonly) mkdirSync(dirname(path), { recursive: true });
-	const db = new Database(path, { readonly: opts.readonly ?? false });
+	const db = new Database(path, { readonly: opts.readonly ?? false, timeout: 5000 });
+	db.pragma("busy_timeout = 5000");
 	if (!opts.readonly) {
 		db.pragma("journal_mode = WAL");
 		db.pragma("synchronous = NORMAL");
@@ -14,7 +15,6 @@ export function openDb(path: string, opts: { readonly?: boolean } = {}): DB {
 		db.pragma("cache_size = -64000");
 	}
 	db.pragma("foreign_keys = ON");
-	db.pragma("busy_timeout = 5000");
 	return db;
 }
 

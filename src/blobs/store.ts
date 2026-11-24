@@ -35,10 +35,11 @@ export function sanitizeName(name: string | undefined): string {
 
 export class BlobStore {
 	private resolvedDir: string;
+	private inFlightBytes = 0;
 	constructor(
 		private dir: string,
 		private repos: Repos,
-		private limits: { blobMaxBytes: number; blobTtlDays: number },
+		private limits: { blobMaxBytes: number; blobTotalMaxBytes?: number; blobTtlDays: number },
 	) {
 		mkdirSync(dir, { recursive: true, mode: 0o700 });
 		this.resolvedDir = resolve(dir);
@@ -58,42 +59,71 @@ export class BlobStore {
 		const tmp = join(this.dir, `${id}.part`);
 		const hash = createHash("sha256");
 		let size = 0;
+		let accounted = 0;
 		const max = this.limits.blobMaxBytes;
-		stream.on("data", (chunk: Buffer) => {
+		const totalMax = this.limits.blobTotalMaxBytes ?? 1_073_741_824;
+		const onData = (chunk: Buffer) => {
 			size += chunk.length;
+			accounted += chunk.length;
+			this.inFlightBytes += chunk.length;
 			hash.update(chunk);
 			if (size > max) stream.destroy(new RelayError("too_large", `el archivo supera ${max} bytes`));
-		});
-		try {
-			await pipeline(stream, createWriteStream(tmp, { mode: 0o600 }));
-			if ((stream as { truncated?: boolean }).truncated)
-				throw new RelayError("too_large", `el archivo supera ${max} bytes`);
-			await rename(tmp, this.path(id));
-		} catch (e) {
-			await rm(tmp, { force: true });
-			if (e instanceof RelayError) throw e;
-			if ((e as { code?: string }).code === "FST_REQ_FILE_TOO_LARGE")
-				throw new RelayError("too_large", `el archivo supera ${max} bytes`);
-			throw e;
-		}
-		const now = Date.now();
-		const row: BlobRow = {
-			id,
-			sha256: hash.digest("hex"),
-			name: sanitizeName(meta.name),
-			mime: sanitizeMime(meta.mime),
-			size,
-			uploaded_by: meta.uploadedBy,
-			created_at: now,
-			expires_at: now + this.limits.blobTtlDays * DAY,
+			else if (size > totalMax)
+				stream.destroy(new RelayError("too_large", `la cuota total de adjuntos supera ${totalMax} bytes`));
 		};
+		stream.on("data", onData);
 		try {
-			this.repos.blobs.insert(row);
-		} catch (e) {
-			await rm(this.path(id), { force: true });
-			throw e;
+			try {
+				await pipeline(stream, createWriteStream(tmp, { mode: 0o600 }));
+				if ((stream as { truncated?: boolean }).truncated)
+					throw new RelayError("too_large", `el archivo supera ${max} bytes`);
+			} catch (e) {
+				await rm(tmp, { force: true });
+				if (e instanceof RelayError) throw e;
+				if ((e as { code?: string }).code === "FST_REQ_FILE_TOO_LARGE")
+					throw new RelayError("too_large", `el archivo supera ${max} bytes`);
+				throw e;
+			}
+
+			// Enforce cumulative quota across persisted active blobs and concurrent in-flight uploads.
+			const overQuota = () => this.repos.blobs.totalActiveBytes(Date.now()) + this.inFlightBytes > totalMax;
+			if (overQuota()) {
+				await this.gc();
+				if (overQuota()) {
+					await rm(tmp, { force: true });
+					throw new RelayError("too_large", `la cuota total de adjuntos supera ${totalMax} bytes`);
+				}
+			}
+
+			try {
+				await rename(tmp, this.path(id));
+			} catch (e) {
+				await rm(tmp, { force: true });
+				throw e;
+			}
+
+			const now = Date.now();
+			const row: BlobRow = {
+				id,
+				sha256: hash.digest("hex"),
+				name: sanitizeName(meta.name),
+				mime: sanitizeMime(meta.mime),
+				size,
+				uploaded_by: meta.uploadedBy,
+				created_at: now,
+				expires_at: now + this.limits.blobTtlDays * DAY,
+			};
+			try {
+				this.repos.blobs.insert(row);
+			} catch (e) {
+				await rm(this.path(id), { force: true });
+				throw e;
+			}
+			return row;
+		} finally {
+			stream.off("data", onData);
+			this.inFlightBytes -= accounted;
 		}
-		return row;
 	}
 
 	open(id: string) {

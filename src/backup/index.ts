@@ -13,11 +13,19 @@ export function backupNow(db: DB, dir: string, at = new Date()): string {
 	let target = join(dir, `rp-${stamp(at)}.db`);
 	let n = 1;
 	while (existsSync(target)) target = join(dir, `rp-${stamp(at)}-${n++}.db`);
-	db.prepare("VACUUM INTO ?").run(target);
+	const tmp = `${target}.tmp-${process.pid}`;
+	rmSync(tmp, { force: true });
 	try {
-		chmodSync(target, 0o600);
-	} catch {
-		// sistemas de archivos sin permisos POSIX
+		db.prepare("VACUUM INTO ?").run(tmp);
+		try {
+			chmodSync(tmp, 0o600);
+		} catch {
+			// sistemas de archivos sin permisos POSIX
+		}
+		renameSync(tmp, target);
+	} catch (e) {
+		rmSync(tmp, { force: true });
+		throw e;
 	}
 	return target;
 }
@@ -35,8 +43,16 @@ export function listBackups(dir: string): { file: string; path: string; mtimeMs:
 }
 
 export function pruneBackups(dir: string, keepDays: number, now = Date.now()): number {
+	const backups = listBackups(dir);
+	if (backups.length <= 1) return 0;
+	let protectedPath = backups[0]!.path;
+	if (backups.every((b) => now - b.mtimeMs > keepDays * DAY)) {
+		const newestValid = backups.find((b) => verifyDb(b.path).ok);
+		if (newestValid) protectedPath = newestValid.path;
+	}
 	let n = 0;
-	for (const b of listBackups(dir)) {
+	for (const b of backups) {
+		if (b.path === protectedPath) continue;
 		if (now - b.mtimeMs > keepDays * DAY) {
 			rmSync(b.path, { force: true });
 			n++;
@@ -73,19 +89,13 @@ export function verifyDb(file: string): VerifyResult {
 }
 
 /**
- * Restaura una copia sobre `dbFile` (el relay debe estar parado). La base anterior se conserva como
- * `<dbFile>.pre-restore-<fecha>` y se descartan sus `-wal`/`-shm`.
+ * Restaura una copia sobre `dbFile` (el relay debe estar parado). La base anterior y sus archivos
+ * `-wal`/`-shm` se conservan como `<dbFile>.pre-restore-<fecha>` (+ `-wal`/`-shm`).
  */
 export function restoreBackup(backupFile: string, dbFile: string, at = new Date()): { previous: string | null } {
 	const v = verifyDb(backupFile);
 	if (!v.ok) throw new Error(`la copia no es válida: ${v.detail}`);
-	let previous: string | null = null;
-	if (existsSync(dbFile)) {
-		previous = `${dbFile}.pre-restore-${stamp(at)}`;
-		renameSync(dbFile, previous);
-	}
-	rmSync(`${dbFile}-wal`, { force: true });
-	rmSync(`${dbFile}-shm`, { force: true });
+
 	const tmpFile = `${dbFile}.restore-${process.pid}.tmp`;
 	try {
 		copyFileSync(backupFile, tmpFile);
@@ -94,14 +104,57 @@ export function restoreBackup(backupFile: string, dbFile: string, at = new Date(
 		} catch {
 			// sistemas de archivos sin permisos POSIX
 		}
+		const staged = verifyDb(tmpFile);
+		if (!staged.ok) throw new Error(`la base restaurada no pasó la verificación: ${staged.detail}`);
+	} catch (e) {
+		rmSync(tmpFile, { force: true });
+		throw e;
+	}
+
+	let previous: string | null = null;
+	let movedMain = false;
+	let movedWal = false;
+	let movedShm = false;
+	const walFile = `${dbFile}-wal`;
+	const shmFile = `${dbFile}-shm`;
+	try {
+		if (existsSync(dbFile)) {
+			let prev = `${dbFile}.pre-restore-${stamp(at)}`;
+			let n = 1;
+			while (existsSync(prev)) prev = `${dbFile}.pre-restore-${stamp(at)}-${n++}`;
+			previous = prev;
+			renameSync(dbFile, previous);
+			movedMain = true;
+			if (existsSync(walFile)) {
+				renameSync(walFile, `${previous}-wal`);
+				movedWal = true;
+			}
+			if (existsSync(shmFile)) {
+				renameSync(shmFile, `${previous}-shm`);
+				movedShm = true;
+			}
+		} else {
+			rmSync(walFile, { force: true });
+			rmSync(shmFile, { force: true });
+		}
 		renameSync(tmpFile, dbFile);
 		const after = verifyDb(dbFile);
 		if (!after.ok) throw new Error(`la base restaurada no pasó la verificación: ${after.detail}`);
 	} catch (e) {
 		rmSync(tmpFile, { force: true });
-		if (previous && existsSync(previous)) {
-			rmSync(dbFile, { force: true });
-			renameSync(previous, dbFile);
+		if (previous) {
+			if (movedMain && existsSync(previous)) {
+				rmSync(dbFile, { force: true });
+				renameSync(previous, dbFile);
+			}
+			if (movedWal && existsSync(`${previous}-wal`)) {
+				rmSync(walFile, { force: true });
+				renameSync(`${previous}-wal`, walFile);
+			}
+			if (movedShm && existsSync(`${previous}-shm`)) {
+				rmSync(shmFile, { force: true });
+				renameSync(`${previous}-shm`, shmFile);
+			}
 		}
 		throw e;
 	}

@@ -44,4 +44,10 @@ export class BlobsRepo {
 	all(): BlobRow[] {
 		return stmt(this.db, "SELECT * FROM blobs").all() as BlobRow[];
 	}
+	totalActiveBytes(now: number): number {
+		const row = stmt(this.db, "SELECT COALESCE(SUM(size), 0) AS total FROM blobs WHERE expires_at > ?").get(now) as {
+			total: number;
+		};
+		return row.total;
+	}
 }

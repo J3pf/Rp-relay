@@ -22,6 +22,14 @@ export interface Check {
 	detail: string;
 }
 
+const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" || host === "::1" || host === "localhost";
+
+function checkFileMode(filePath: string): { mode: number; lax: boolean } | null {
+	if (!existsSync(filePath)) return null;
+	const mode = statSync(filePath).mode & 0o777;
+	return { mode, lax: (mode & 0o077) !== 0 };
+}
+
 /** `rp-relay doctor`: configuración, DB, permisos, FCM, publicUrl alcanzable, reloj, disco, TLS y copias. */
 export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promise<Check[]> {
 	const out: Check[] = [];
@@ -50,17 +58,21 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 	// directorio de datos y permisos
 	try {
 		accessSync(config.dataDir, constants.R_OK | constants.W_OK);
-		add("Directorio de datos", "ok", config.dataDir);
+		const dirMode = checkFileMode(config.dataDir);
+		add(
+			"Directorio de datos",
+			dirMode?.lax ? "warn" : "ok",
+			dirMode?.lax ? `${config.dataDir} — permisos ${dirMode.mode.toString(8)}: debería ser 700` : config.dataDir,
+		);
 	} catch {
 		add("Directorio de datos", "fail", `${config.dataDir} no existe o no es escribible por este usuario`);
 	}
-	const tokenFile = adminTokenPath(config);
-	if (existsSync(tokenFile)) {
-		const mode = statSync(tokenFile).mode & 0o777;
+	const tokenMode = checkFileMode(adminTokenPath(config));
+	if (tokenMode) {
 		add(
 			"admin.token",
-			mode & 0o077 ? "warn" : "ok",
-			mode & 0o077 ? `permisos ${mode.toString(8)}: debería ser 600` : "permisos 600",
+			tokenMode.lax ? "warn" : "ok",
+			tokenMode.lax ? `permisos ${tokenMode.mode.toString(8)}: debería ser 600` : "permisos 600",
 		);
 	}
 
@@ -68,6 +80,16 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 	const dbFile = dbPath(config);
 	if (!existsSync(dbFile)) add("Base de datos", "fail", `${dbFile} no existe (ejecuta rp-relay init)`);
 	else {
+		const dbFiles = [
+			{ label: "relay.db", path: dbFile },
+			{ label: "relay.db-wal", path: `${dbFile}-wal` },
+			{ label: "relay.db-shm", path: `${dbFile}-shm` },
+		];
+		const laxDb: { label: string; mode: number }[] = [];
+		for (const f of dbFiles) {
+			const m = checkFileMode(f.path);
+			if (m?.lax) laxDb.push({ label: f.label, mode: m.mode });
+		}
 		try {
 			const db = openDb(dbFile, { readonly: true });
 			const q = db.pragma("quick_check") as { quick_check: string }[];
@@ -86,6 +108,13 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 		} catch (e) {
 			add("Base de datos", "fail", (e as Error).message);
 		}
+		add(
+			"Permisos de BD",
+			laxDb.length > 0 ? "warn" : "ok",
+			laxDb.length > 0
+				? `${laxDb.map((f) => `${f.label} (${f.mode.toString(8)})`).join(", ")}: debería ser 600`
+				: "permisos 600",
+		);
 	}
 
 	// disco libre
@@ -121,11 +150,11 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 				throw new Error("la cuenta de servicio no tiene private_key/client_email/project_id");
 			try {
 				await import("firebase-admin");
-				const mode = statSync(config.fcm.serviceAccountFile).mode & 0o777;
+				const fcmMode = checkFileMode(config.fcm.serviceAccountFile);
 				add(
 					"FCM",
-					mode & 0o077 ? "warn" : "ok",
-					`proyecto ${sa.project_id}${mode & 0o077 ? ` — permisos ${mode.toString(8)}: usa chmod 600` : ""}`,
+					fcmMode?.lax ? "warn" : "ok",
+					`proyecto ${sa.project_id}${fcmMode?.lax ? ` — permisos ${fcmMode.mode.toString(8)}: usa chmod 600` : ""}`,
 				);
 			} catch {
 				add("FCM", "fail", "firebase-admin no está instalado");
@@ -141,11 +170,11 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 		try {
 			const pem = readFileSync(config.apns.keyFile, "utf8");
 			if (!pem.includes("PRIVATE KEY")) throw new Error("el archivo .p8 no contiene una PRIVATE KEY válida");
-			const mode = statSync(config.apns.keyFile).mode & 0o777;
+			const apnsMode = checkFileMode(config.apns.keyFile);
 			add(
 				"APNs",
-				mode & 0o077 ? "warn" : "ok",
-				`${config.apns.bundleId} (${config.apns.env})${mode & 0o077 ? ` — permisos ${mode.toString(8)}: usa chmod 600` : ""}`,
+				apnsMode?.lax ? "warn" : "ok",
+				`${config.apns.bundleId} (${config.apns.env})${apnsMode?.lax ? ` — permisos ${apnsMode.mode.toString(8)}: usa chmod 600` : ""}`,
 			);
 		} catch (e) {
 			add("APNs", "fail", (e as Error).message);
@@ -162,8 +191,16 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 			} catch (e) {
 				add("TLS (certificado)", "fail", (e as Error).message);
 			}
+			const tlsKeyMode = checkFileMode(config.tls.key);
+			if (tlsKeyMode) {
+				add(
+					"TLS (clave)",
+					tlsKeyMode.lax ? "warn" : "ok",
+					tlsKeyMode.lax ? `permisos ${tlsKeyMode.mode.toString(8)}: debería ser 600` : "permisos 600",
+				);
+			}
 		} else add("TLS (ACME)", "ok", `dominio ${config.tls.acme.domain}`);
-	} else if (config.publicUrl.startsWith("https://") && config.listen.host !== "127.0.0.1") {
+	} else if (config.publicUrl.startsWith("https://") && !isLoopbackHost(config.listen.host)) {
 		add("TLS", "warn", "publicUrl es https pero el relay escucha sin TLS fuera de loopback");
 	}
 
