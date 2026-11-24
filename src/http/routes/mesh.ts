@@ -86,7 +86,7 @@ export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 			preHandler: auth.device,
 		},
 		async (req) => {
-			const agentId = decodeURIComponent(req.params.agentId);
+			const agentId = req.params.agentId;
 			const limit = clampedLimit(req.query.limit);
 			const comms = c().repos.comms.listByAgent(agentId, limit * 3);
 			return { items: toCommViews(deduplicateCommRows(comms).slice(0, limit), c) };

@@ -19,7 +19,12 @@ export async function runRetention(c: Ctx, now = Date.now()): Promise<RetentionS
 	const events = repos.events.prune(now - L.eventRetentionDays * DAY, L.eventsPerAgent);
 	// no se purgan agentes con prompts abiertos o conectados
 	const stale = repos.agents.purgeOffline(now - L.offlineAgentRetentionDays * DAY);
-	for (const id of stale) publisher.agentRemoved(id);
+	for (const id of stale) {
+		c.agents.clearGrace(id);
+		c.hub.clearAgentSubscribers(id);
+		c.messages.forget(id);
+		publisher.agentRemoved(id);
+	}
 	const staleAnswered = c.prompts.expireStaleAnswered(now - DAY);
 	const prompts = repos.prompts.purgeClosed(now - L.promptRetentionDays * DAY);
 	const codes = repos.pairing.purge(now - DAY);

@@ -40,7 +40,12 @@ export class HistoryService {
 			entries = snap.payload.entries as Entry[];
 			from = snap.seq;
 		}
-		const rows = repos.events.since(agentId, cur, from, limit);
+		const rawRows = repos.events.sinceLatest(agentId, cur, from, limit + 1);
+		const overflowed = rawRows.length > limit;
+		const rows = overflowed ? rawRows.slice(rawRows.length - limit) : rawRows;
+		if (overflowed && entries.length > 0) {
+			entries = [];
+		}
 		const entryBytes = entries.map((e) => Buffer.byteLength(JSON.stringify(e), "utf8") + 1);
 		const rowBytes = rows.map((r) => Buffer.byteLength(r.payload, "utf8") + 32);
 		let totalBytes = 24;
@@ -49,7 +54,7 @@ export class HistoryService {
 
 		let entryStart = 0;
 		let rowStart = 0;
-		let truncated = Boolean(snap && !canResume && (snap.payload.truncated || snapPruned));
+		let truncated = Boolean(snap && !canResume && (snap.payload.truncated || snapPruned)) || overflowed;
 		while (entryStart < entries.length && totalBytes > FRAME_BUDGET) {
 			totalBytes -= entryBytes[entryStart]!;
 			entryStart++;

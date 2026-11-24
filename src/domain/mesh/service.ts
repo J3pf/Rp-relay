@@ -9,6 +9,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const UPDATE_INTERVAL_MS = 500;
 const SEEN_TTL_MS = DAY_MS;
 const MAX_SEEN_MESSAGES = 20_000;
+const MAX_CACHE_ENTRIES = 64;
 
 type CachedSnapshot = { snapshot: MeshSnapshot; generatedAt: number };
 
@@ -53,7 +54,7 @@ export function buildCommView(
 		fromName: senderNode?.name ?? agentDisplayName(senderCandidate),
 		toName: receiverNode?.name ?? agentDisplayName(receiverCandidate),
 		action: comm.action,
-		text: sender?.redacted ? null : comm.text,
+		text: sender?.redacted || receiver?.redacted ? null : comm.text,
 		truncated: Boolean(comm.truncated),
 		at: comm.at,
 		groupId: senderNode?.groupId ?? receiverNode?.groupId ?? null,
@@ -85,11 +86,25 @@ export class MeshService {
 
 	getSnapshot(machineId: string | null): MeshSnapshot {
 		const now = Date.now();
-		let snapshot = this.cache.get(machineId)?.snapshot;
+		const cachedEntry = this.cache.get(machineId);
+		let snapshot = cachedEntry?.snapshot;
+		if (cachedEntry) {
+			this.cache.delete(machineId);
+			this.cache.set(machineId, cachedEntry);
+		}
 		if (!snapshot) {
 			const { repos } = this.c();
 			const machines = repos.machines.list();
 			const activeMachineIds = new Set(machines.filter((m) => !m.revoked_at).map((m) => m.id));
+			if (machineId !== null && !activeMachineIds.has(machineId)) {
+				return {
+					machineId,
+					generatedAt: now,
+					groups: [],
+					nodes: [],
+					edges: [],
+				};
+			}
 			const agents = repos.agents
 				.list()
 				.filter((a) => activeMachineIds.has(a.machine_id) && (machineId === null || a.machine_id === machineId));
@@ -140,6 +155,11 @@ export class MeshService {
 				latestSubagentsByAgent,
 			});
 			this.cache.set(machineId, { snapshot, generatedAt: snapshot.generatedAt });
+			while (this.cache.size > MAX_CACHE_ENTRIES) {
+				const oldest = this.cache.keys().next().value;
+				if (oldest === undefined) break;
+				this.cache.delete(oldest);
+			}
 			this.scheduleActiveExpiry([...this.cache.values()].map((cached) => cached.snapshot));
 		}
 		return {

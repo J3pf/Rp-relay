@@ -66,7 +66,10 @@ export class MachinesRepo {
 		if (p.color !== undefined) add("color", p.color);
 		if (p.icon !== undefined) add("icon", p.icon);
 		if (p.quietHours !== undefined) add("quiet_hours", p.quietHours === null ? null : JSON.stringify(p.quietHours));
-		if (sets.length === 0) return this.get(id) !== undefined;
+		if (sets.length === 0) {
+			const m = this.get(id);
+			return m !== undefined && m.revoked_at === null;
+		}
 		return (
 			stmt(this.db, `UPDATE machines SET ${sets.join(", ")} WHERE id=? AND revoked_at IS NULL`).run(...vals, id)
 				.changes > 0

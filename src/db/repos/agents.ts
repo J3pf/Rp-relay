@@ -40,6 +40,7 @@ export interface AgentRow {
 const j = (v: unknown): string | null => (v === undefined || v === null ? null : JSON.stringify(v));
 
 export class AgentsRepo {
+	private archiveTx?: (id: string, now: number) => boolean;
 	private deleteTx?: (id: string) => void;
 	constructor(private db: DB) {}
 	get(id: string): AgentRow | undefined {
@@ -84,47 +85,66 @@ export class AgentsRepo {
 	): { row: AgentRow; epochChanged: boolean; previousSeq: number } {
 		const prev = this.get(h.agentId);
 		const epochChanged = !prev || prev.epoch !== h.epoch;
-		const gentleMode = h.gentle?.mode ?? null;
-		const vals = [
-			h.kind ?? "pi",
-			h.instance,
-			h.epoch,
-			h.session.id,
-			h.session.name ?? null,
-			h.session.file ?? null,
-			h.launcher ?? null,
-			j(h.herdr),
-			j(h.gentle),
-			gentleMode,
-			h.redacted ? 1 : 0,
-			h.spawnId ?? null,
-			h.cwd ?? null,
-			h.git?.branch ?? null,
-			h.git?.dirty === undefined ? null : h.git.dirty ? 1 : 0,
-			h.model ? `${h.model.provider}/${h.model.id}` : null,
-			h.thinking ?? null,
-			h.status,
-			h.host.pid ?? null,
-			h.pi.version,
-			h.plugin.version,
-			JSON.stringify(h.plugin.features),
-			h.transport ?? "ws",
-		];
+		const params = {
+			id: h.agentId,
+			machine_id: machineId,
+			kind: h.kind ?? "pi",
+			instance: h.instance,
+			epoch: h.epoch,
+			session_id: h.session.id,
+			session_name: h.session.name ?? null,
+			session_file: h.session.file ?? null,
+			launcher: h.launcher ?? null,
+			herdr: j(h.herdr),
+			gentle: j(h.gentle),
+			gentle_mode: h.gentle?.mode ?? null,
+			redacted: h.redacted ? 1 : 0,
+			spawn_id: h.spawnId ?? null,
+			cwd: h.cwd ?? null,
+			git_branch: h.git?.branch ?? null,
+			git_dirty: h.git?.dirty === undefined ? null : h.git.dirty ? 1 : 0,
+			model: h.model ? `${h.model.provider}/${h.model.id}` : null,
+			thinking: h.thinking ?? null,
+			status: h.status,
+			pid: h.host.pid ?? null,
+			pi_version: h.pi.version,
+			plugin_version: h.plugin.version,
+			features: JSON.stringify(h.plugin.features),
+			transport: h.transport ?? "ws",
+			now,
+			epoch_changed: epochChanged ? 1 : 0,
+		};
 		if (!prev) {
 			stmt(
 				this.db,
-				`INSERT INTO agents(id,machine_id,kind,instance,epoch,session_id,session_name,session_file,launcher,herdr,gentle,gentle_mode,redacted,spawn_id,
-					 cwd,git_branch,git_dirty,model,thinking,status,pid,pi_version,plugin_version,features,transport,online,last_seq,first_seen_at,last_seen_at)
-					 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,0,?,?)`,
-			).run(h.agentId, machineId, ...vals, now, now);
+				`INSERT INTO agents(
+					id, machine_id, kind, instance, epoch, session_id, session_name, session_file,
+					launcher, herdr, gentle, gentle_mode, redacted, spawn_id, cwd, git_branch,
+					git_dirty, model, thinking, status, pid, pi_version, plugin_version, features,
+					transport, online, last_seq, first_seen_at, last_seen_at
+				) VALUES (
+					@id, @machine_id, @kind, @instance, @epoch, @session_id, @session_name, @session_file,
+					@launcher, @herdr, @gentle, @gentle_mode, @redacted, @spawn_id, @cwd, @git_branch,
+					@git_dirty, @model, @thinking, @status, @pid, @pi_version, @plugin_version, @features,
+					@transport, 1, 0, @now, @now
+				)`,
+			).run(params);
 		} else {
 			// A live hello always makes the agent visible again.
 			stmt(
 				this.db,
-				`UPDATE agents SET kind=?,instance=?,epoch=?,session_id=?,session_name=?,session_file=?,launcher=?,herdr=?,gentle=?,gentle_mode=?,redacted=?,spawn_id=?,
-					 cwd=?,git_branch=?,git_dirty=?,model=?,thinking=?,status=?,status_detail=NULL,pid=?,pi_version=?,plugin_version=?,features=?,transport=?,
-					 online=1,archived_at=NULL,last_seq=CASE WHEN ? THEN 0 ELSE last_seq END,last_seen_at=CASE WHEN ? THEN ? ELSE last_seen_at END WHERE id=?`,
-			).run(...vals, epochChanged ? 1 : 0, epochChanged ? 1 : 0, now, h.agentId);
+				`UPDATE agents SET
+					kind=@kind, instance=@instance, epoch=@epoch, session_id=@session_id,
+					session_name=@session_name, session_file=@session_file, launcher=@launcher,
+					herdr=@herdr, gentle=@gentle, gentle_mode=@gentle_mode, redacted=@redacted,
+					spawn_id=@spawn_id, cwd=@cwd, git_branch=@git_branch, git_dirty=@git_dirty,
+					model=@model, thinking=@thinking, status=@status, status_detail=NULL,
+					pid=@pid, pi_version=@pi_version, plugin_version=@plugin_version,
+					features=@features, transport=@transport, online=1, archived_at=NULL,
+					last_seq=CASE WHEN @epoch_changed THEN 0 ELSE last_seq END,
+					last_seen_at=CASE WHEN @epoch_changed THEN @now ELSE last_seen_at END
+				WHERE id=@id`,
+			).run(params);
 		}
 		return { row: this.get(h.agentId)!, epochChanged, previousSeq: prev && !epochChanged ? prev.last_seq : 0 };
 	}
@@ -164,16 +184,32 @@ export class AgentsRepo {
 		stmt(this.db, "UPDATE agents SET thinking=? WHERE id=?").run(thinking, id);
 	}
 	archive(id: string, now: number): boolean {
-		return (
-			stmt(this.db, "UPDATE agents SET archived_at=?, online=0 WHERE id=? AND archived_at IS NULL").run(now, id)
-				.changes > 0
-		);
+		this.archiveTx ??= this.db.transaction((agentId: string, ts: number) => {
+			const row = stmt(
+				this.db,
+				"SELECT MAX(archived_at) AS max_at FROM agents WHERE archived_at IS NOT NULL",
+			).get() as { max_at: number | null };
+			const archivedAt = row.max_at !== null && row.max_at >= ts ? row.max_at + 1 : ts;
+			return (
+				stmt(this.db, "UPDATE agents SET archived_at=?, online=0 WHERE id=? AND archived_at IS NULL").run(
+					archivedAt,
+					agentId,
+				).changes > 0
+			);
+		});
+		return this.archiveTx(id, now);
 	}
 	resetEpoch(id: string, epoch: string): void {
 		stmt(this.db, "UPDATE agents SET epoch=?, last_seq=0 WHERE id=?").run(epoch, id);
 	}
 	delete(id: string): void {
 		this.deleteTx ??= this.db.transaction((agentId: string) => {
+			const agent = stmt(this.db, "SELECT redacted FROM agents WHERE id=?").get(agentId) as
+				| { redacted: number }
+				| undefined;
+			if (agent?.redacted === 1) {
+				stmt(this.db, "UPDATE comms SET text=NULL WHERE peer_agent_id=?").run(agentId);
+			}
 			stmt(this.db, "DELETE FROM events WHERE agent_id=?").run(agentId);
 			stmt(this.db, "DELETE FROM snapshots WHERE agent_id=?").run(agentId);
 			stmt(this.db, "DELETE FROM prompts WHERE agent_id=?").run(agentId);

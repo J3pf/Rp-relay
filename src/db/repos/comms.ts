@@ -58,7 +58,12 @@ export class CommsRepo {
 				peer_session_id, peer_name, peer_cwd, peer_ref, peer_agent_id,
 				message_id, reply_to, expects_reply, text, truncated, delivered,
 				at, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (
+				@agent_id, @comm_id, @machine_id, @direction, @channel, @action,
+				@peer_session_id, @peer_name, @peer_cwd, @peer_ref, @peer_agent_id,
+				@message_id, @reply_to, @expects_reply, @text, @truncated, @delivered,
+				@at, @now, @now
+			)
 			ON CONFLICT(agent_id, comm_id) DO UPDATE SET
 				delivered=COALESCE(excluded.delivered, comms.delivered),
 				message_id=COALESCE(excluded.message_id, comms.message_id),
@@ -70,28 +75,27 @@ export class CommsRepo {
 				reply_to=COALESCE(comms.reply_to, excluded.reply_to),
 				text=COALESCE(comms.text, excluded.text),
 				updated_at=excluded.updated_at`,
-		).run(
-			comm.agent_id,
-			comm.comm_id,
-			comm.machine_id,
-			comm.direction,
-			comm.channel,
-			comm.action,
-			comm.peer_session_id,
-			comm.peer_name,
-			comm.peer_cwd,
-			comm.peer_ref,
-			comm.peer_agent_id ?? null,
-			comm.message_id,
-			comm.reply_to,
-			comm.expects_reply ? 1 : 0,
-			comm.text,
-			comm.truncated ? 1 : 0,
-			typeof comm.delivered === "boolean" ? Number(comm.delivered) : comm.delivered,
-			comm.at,
+		).run({
+			agent_id: comm.agent_id,
+			comm_id: comm.comm_id,
+			machine_id: comm.machine_id,
+			direction: comm.direction,
+			channel: comm.channel,
+			action: comm.action,
+			peer_session_id: comm.peer_session_id,
+			peer_name: comm.peer_name,
+			peer_cwd: comm.peer_cwd,
+			peer_ref: comm.peer_ref,
+			peer_agent_id: comm.peer_agent_id ?? null,
+			message_id: comm.message_id,
+			reply_to: comm.reply_to,
+			expects_reply: comm.expects_reply ? 1 : 0,
+			text: comm.text,
+			truncated: comm.truncated ? 1 : 0,
+			delivered: typeof comm.delivered === "boolean" ? Number(comm.delivered) : comm.delivered,
+			at: comm.at,
 			now,
-			now,
-		);
+		});
 		return this.get(comm.agent_id, comm.comm_id)!;
 	}
 
@@ -148,14 +152,28 @@ export class CommsRepo {
 		).all(agentId, agentId, limit) as CommRow[];
 	}
 
-	listUnresolved(): CommRow[] {
+	listUnresolved(sinceMs = 0, limit = 500): CommRow[] {
 		return stmt(
 			this.db,
-			"SELECT * FROM comms WHERE peer_agent_id IS NULL ORDER BY at DESC, comm_id DESC",
-		).all() as CommRow[];
+			`SELECT * FROM comms
+			 WHERE peer_agent_id IS NULL
+			   AND at >= ?
+			   AND agent_id NOT IN (SELECT id FROM agents WHERE archived_at IS NOT NULL)
+			 ORDER BY at DESC, comm_id DESC
+			 LIMIT ?`,
+		).all(sinceMs, limit) as CommRow[];
 	}
 
-	setPeerAgentId(agentId: string, commId: string, peerAgentId: string): void {
+	setPeerAgentId(agentId: string, commId: string, peerAgentId: string, redactText = false): void {
+		if (redactText) {
+			stmt(this.db, "UPDATE comms SET peer_agent_id=?, text=NULL, updated_at=? WHERE agent_id=? AND comm_id=?").run(
+				peerAgentId,
+				Date.now(),
+				agentId,
+				commId,
+			);
+			return;
+		}
 		stmt(this.db, "UPDATE comms SET peer_agent_id=?, updated_at=? WHERE agent_id=? AND comm_id=?").run(
 			peerAgentId,
 			Date.now(),

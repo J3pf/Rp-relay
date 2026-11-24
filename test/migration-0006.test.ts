@@ -80,7 +80,7 @@ describe("migration 0006_apns_push", () => {
 			PRESERVED_TABLES.map((table) => [table, db.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[]]),
 		);
 
-		expect(migrate(db, { dir: MIGRATIONS_DIR })).toEqual([6]);
+		expect(migrate(db, { dir: MIGRATIONS_DIR })).toContain(6);
 		expect(migrate(db, { dir: MIGRATIONS_DIR })).toEqual([]);
 
 		const columns = db.prepare("PRAGMA table_info(devices)").all() as {

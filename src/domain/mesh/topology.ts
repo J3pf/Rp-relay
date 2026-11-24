@@ -21,6 +21,8 @@ type TopologyMessage = {
 };
 
 type InternalEdge = {
+	a: string;
+	b: string;
 	messages: TopologyMessage[];
 };
 
@@ -116,14 +118,23 @@ function deduplicateMessages(comms: CommRow[], agentIds: Set<string>): TopologyM
 		);
 }
 
+function orderedPair(first: string, second: string): [string, string] {
+	return first < second ? [first, second] : [second, first];
+}
+
 function edgeKey(a: string, b: string): string {
-	return a < b ? `${a}|${b}` : `${b}|${a}`;
+	return `${a}\u0000${b}`;
+}
+
+function formatEdgeId(a: string, b: string): string {
+	if (!a.includes("|") && !b.includes("|")) return `${a}|${b}`;
+	const escapePart = (value: string) => value.replaceAll("%", "%25").replaceAll("|", "%7C");
+	return `${escapePart(a)}|${escapePart(b)}`;
 }
 
 function connectedComponents(edges: Map<string, InternalEdge>): string[][] {
 	const neighbors = new Map<string, Set<string>>();
-	for (const key of edges.keys()) {
-		const [a, b] = key.split("|");
+	for (const { a, b } of edges.values()) {
 		if (!a || !b) continue;
 		(neighbors.get(a) ?? neighbors.set(a, new Set()).get(a)!).add(b);
 		(neighbors.get(b) ?? neighbors.set(b, new Set()).get(b)!).add(a);
@@ -164,7 +175,7 @@ function isStrictAncestor(parent: string, child: string): boolean {
 	);
 }
 
-function todoSummary(tasks: TodoTask[] | undefined): MeshNode["todos"] {
+function todoSummary(tasks: TodoTask[] | undefined, redacted = false): MeshNode["todos"] {
 	const valid = tasks?.filter((task): task is TodoTask => Boolean(task && typeof task === "object"));
 	if (!valid?.length) return null;
 	return {
@@ -173,11 +184,11 @@ function todoSummary(tasks: TodoTask[] | undefined): MeshNode["todos"] {
 		inProgress: valid.filter((task) => task.status === "in_progress").length,
 		blocked: valid.filter((task) => task.status === "blocked").length,
 		pending: valid.filter((task) => task.status === "pending").length,
-		current: valid.find((task) => task.status === "in_progress")?.title ?? null,
+		current: redacted ? null : (valid.find((task) => task.status === "in_progress")?.title ?? null),
 	};
 }
 
-function latestSubagents(events: SubagentUpdateEvent[] | undefined): MeshNode["subagents"] {
+function latestSubagents(events: SubagentUpdateEvent[] | undefined, redacted = false): MeshNode["subagents"] {
 	if (!events?.length) return [];
 	const latestByTask = new Map<string, { event: SubagentUpdateEvent; index: number }>();
 	for (const [index, event] of events.entries()) {
@@ -194,6 +205,13 @@ function latestSubagents(events: SubagentUpdateEvent[] | undefined): MeshNode["s
 		.slice(0, 10)
 		.map(({ event }) => {
 			const { type: _type, ...subagent } = event;
+			if (redacted) {
+				const { label: _label, error: _error, result: _result, ...safe } = subagent;
+				return {
+					...safe,
+					agent: typeof safe.agent === "string" ? safe.agent : "",
+				};
+			}
 			return {
 				...subagent,
 				agent: typeof subagent.agent === "string" ? subagent.agent : "",
@@ -425,10 +443,14 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 	const messages = deduplicateMessages(recentComms, new Set(agentsById.keys()));
 	const edgesById = new Map<string, InternalEdge>();
 	for (const message of messages) {
-		const key = edgeKey(message.fromAgentId, message.toAgentId);
-		const edge = edgesById.get(key) ?? { messages: [] };
+		const [a, b] = orderedPair(message.fromAgentId, message.toAgentId);
+		const key = edgeKey(a, b);
+		let edge = edgesById.get(key);
+		if (!edge) {
+			edge = { a, b, messages: [] };
+			edgesById.set(key, edge);
+		}
 		edge.messages.push(message);
-		edgesById.set(key, edge);
 	}
 
 	const components = connectedComponents(edgesById);
@@ -481,9 +503,9 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 		);
 	}
 
-	const edges = [...edgesById.entries()]
-		.map(([id, edge]) => {
-			const [a, b] = id.split("|") as [string, string];
+	const edges = [...edgesById.values()]
+		.map((edge) => {
+			const { a, b } = edge;
 			const orderedMessages = edge.messages;
 			const latest = orderedMessages[orderedMessages.length - 1]!;
 			const replies = new Set<string>();
@@ -500,9 +522,15 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 				}
 			}
 			const latestSender = agentsById.get(latest.fromAgentId);
-			const latestPreview = latestSender?.redacted ? null : latest.text === null ? null : latest.text.slice(0, 140);
+			const latestReceiver = agentsById.get(latest.toAgentId);
+			const latestPreview =
+				latestSender?.redacted || latestReceiver?.redacted
+					? null
+					: latest.text === null
+						? null
+						: latest.text.slice(0, 140);
 			return {
-				edgeId: id,
+				edgeId: formatEdgeId(a, b),
 				a,
 				b,
 				count: orderedMessages.length,
@@ -516,7 +544,7 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 				active: now - latest.at <= ACTIVE_MS,
 			};
 		})
-		.sort((a, b) => a.edgeId.localeCompare(b.edgeId));
+		.sort((x, y) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
 
 	const nodes: MeshNode[] = agents.map((agent) => {
 		const machine = machinesById.get(agent.machine_id);
@@ -536,8 +564,8 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 			role: roleByAgent.get(agent.id) ?? "solo",
 			parentAgentId: parentByAgent.get(agent.id) ?? null,
 			groupId: groupIdByAgent.get(agent.id) ?? null,
-			todos: todoSummary(options.latestTodosByAgent?.[agent.id]),
-			subagents: latestSubagents(options.latestSubagentsByAgent?.[agent.id]),
+			todos: todoSummary(options.latestTodosByAgent?.[agent.id], redacted),
+			subagents: latestSubagents(options.latestSubagentsByAgent?.[agent.id], redacted),
 			lastCommAt: lastCommAtByAgent.get(agent.id) ?? null,
 			openPromptCount: Math.max(0, Math.trunc(options.openPromptsByAgent?.[agent.id] ?? 0)),
 		};

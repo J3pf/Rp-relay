@@ -34,7 +34,7 @@ export function registerAgents(app: FastifyInstance, c: () => Ctx, auth: HttpAut
 		async (req) => {
 			const ack = await c().messages.send(req.device!.id, {
 				...(req.body as object),
-				agentId: decodeURIComponent(req.params.id),
+				agentId: req.params.id,
 			} as never);
 			return ack;
 		},

@@ -14,19 +14,27 @@ export class EntityService {
 	}
 
 	revokeMachine(id: string): boolean {
-		const { repos, hub, prompts, publisher, hosts, mesh } = this.c();
+		const { repos, hub, prompts, publisher, hosts, mesh, messages, agents: agentService } = this.c();
 		const agents = repos.agents.byMachine(id);
+		const liveAgentIds = new Set<string>();
 		for (const conn of hub.agentsOfMachine(id)) {
-			if (conn.agentId) repos.agents.setSeq(conn.agentId, conn.lastSeq);
+			if (conn.agentId) {
+				repos.agents.setSeq(conn.agentId, conn.lastSeq);
+				liveAgentIds.add(conn.agentId);
+			}
 		}
 		const ok = repos.machines.revoke(id, Date.now());
 		if (!ok) return false;
 		hub.closeMachine(id, CloseCode.Unauthorized, "machine revoked");
 		hosts.onMachineRevoked(id);
-		for (const a of agents) {
-			prompts.cancelOpenOfAgent(a.id, ["open", "answered"]);
-			repos.agents.setOffline(a.id, Date.now());
-			publisher.agentRemoved(a.id);
+		const affectedIds = new Set<string>([...agents.map((a) => a.id), ...liveAgentIds]);
+		for (const agentId of affectedIds) {
+			agentService.clearGrace(agentId);
+			hub.clearAgentSubscribers(agentId);
+			messages.forget(agentId);
+			prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
+			repos.agents.setOffline(agentId, Date.now());
+			publisher.agentRemoved(agentId);
 		}
 		mesh.invalidate();
 		publisher.hostRemoved(id);

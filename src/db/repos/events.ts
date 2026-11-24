@@ -34,8 +34,30 @@ export class EventsRepo {
 			limit,
 		) as EventRow[];
 	}
+	sinceLatest(agentId: string, epoch: string, sinceSeq: number, limit = 5000): EventRow[] {
+		return (
+			stmt(this.db, "SELECT * FROM events WHERE agent_id=? AND epoch=? AND seq>? ORDER BY seq DESC LIMIT ?").all(
+				agentId,
+				epoch,
+				sinceSeq,
+				limit,
+			) as EventRow[]
+		).reverse();
+	}
 	listByTypes(agentId: string, epoch: string, types: readonly string[], limit = 1000): EventRow[] {
 		if (types.length === 0) return [];
+		if (
+			types.length === 2 &&
+			((types[0] === "todo_update" && types[1] === "subagent_update") ||
+				(types[0] === "subagent_update" && types[1] === "todo_update"))
+		) {
+			return (
+				stmt(
+					this.db,
+					"SELECT * FROM events WHERE agent_id=? AND epoch=? AND type IN ('todo_update', 'subagent_update') ORDER BY seq DESC LIMIT ?",
+				).all(agentId, epoch, limit) as EventRow[]
+			).reverse();
+		}
 		const placeholders = types.map(() => "?").join(",");
 		return (
 			stmt(

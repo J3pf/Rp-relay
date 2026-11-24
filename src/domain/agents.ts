@@ -14,8 +14,11 @@ import type { Ctx } from "../context.js";
 import type { CommRow } from "../db/repos/comms.js";
 import type { AgentRow, MachineRow } from "../db/repos/index.js";
 import { RelayError } from "../util/errors.js";
+import { DAY } from "../util/time.js";
 import type { AgentConn } from "../ws/conn.js";
 import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolution.js";
+
+const UNRESOLVED_COMM_LIMIT = 500;
 
 function paneBinding(row: AgentRow): string | null {
 	if (!row.herdr) return null;
@@ -63,7 +66,7 @@ export class AgentService {
 		const now = Date.now();
 		this.clearGrace(h.agentId);
 		const { row, epochChanged, previousSeq } = repos.agents.upsertFromHello(machine.id, h, now);
-		this.resolveUnresolvedComms();
+		this.resolveUnresolvedComms(row);
 		conn.agentId = h.agentId;
 		conn.instance = h.instance;
 		conn.epoch = h.epoch;
@@ -144,12 +147,44 @@ export class AgentService {
 		publisher.agent(conn.agentId);
 	}
 
-	private resolveUnresolvedComms(): void {
+	private resolveUnresolvedComms(target?: AgentRow): void {
 		const { repos } = this.c();
-		const unresolved = repos.comms.listUnresolved();
+		const unresolved = repos.comms.listUnresolved(Date.now() - DAY, UNRESOLVED_COMM_LIMIT);
 		if (unresolved.length === 0) return;
+		const matching = target
+			? unresolved.filter((comm) => {
+					if (comm.agent_id === target.id) return false;
+					if (comm.reply_to !== null) return true;
+					if (comm.peer_session_id !== null) {
+						if (comm.peer_session_id === target.session_id) return true;
+						if (
+							comm.peer_session_id.length >= 8 &&
+							(target.session_id.startsWith(comm.peer_session_id) || target.id.startsWith(comm.peer_session_id))
+						) {
+							return true;
+						}
+					}
+					if (
+						comm.peer_ref !== null &&
+						comm.peer_ref.length >= 8 &&
+						(target.session_id.startsWith(comm.peer_ref) || target.id.startsWith(comm.peer_ref))
+					) {
+						return true;
+					}
+					if (
+						target.session_name !== null &&
+						(comm.peer_name === target.session_name || comm.peer_ref === target.session_name)
+					) {
+						return true;
+					}
+					return false;
+				})
+			: unresolved;
+		if (matching.length === 0) return;
 		const allAgents = repos.agents.list();
-		for (const comm of unresolved) {
+		const agentsById = new Map(allAgents.map((agent) => [agent.id, agent]));
+		const replyCache = new Map<string, CommRow | undefined>();
+		for (const comm of matching) {
 			let peerAgentId = resolvePeerAgentId(
 				comm.agent_id,
 				comm.machine_id,
@@ -162,9 +197,16 @@ export class AgentService {
 				allAgents,
 			);
 			if (!peerAgentId && comm.reply_to) {
-				peerAgentId = resolvePeerAgentIdFromReply(comm.agent_id, repos.comms.findByMessageId(comm.reply_to), allAgents);
+				if (!replyCache.has(comm.reply_to)) {
+					replyCache.set(comm.reply_to, repos.comms.findByMessageId(comm.reply_to));
+				}
+				peerAgentId = resolvePeerAgentIdFromReply(comm.agent_id, replyCache.get(comm.reply_to), allAgents);
 			}
-			if (peerAgentId) repos.comms.setPeerAgentId(comm.agent_id, comm.comm_id, peerAgentId);
+			if (peerAgentId) {
+				const shouldRedact =
+					agentsById.get(peerAgentId)?.redacted === 1 || agentsById.get(comm.agent_id)?.redacted === 1;
+				repos.comms.setPeerAgentId(comm.agent_id, comm.comm_id, peerAgentId, shouldRedact);
+			}
 		}
 	}
 
@@ -229,6 +271,11 @@ export class AgentService {
 					if (!peerAgentId && comm.replyTo) {
 						peerAgentId = resolvePeerAgentIdFromReply(agentId, repos.comms.findByMessageId(comm.replyTo), allAgents);
 					}
+					const emitterAgent = allAgents.find((a) => a.id === agentId) ?? repos.agents.get(agentId);
+					const peerAgent = peerAgentId
+						? (allAgents.find((a) => a.id === peerAgentId) ?? repos.agents.get(peerAgentId))
+						: undefined;
+					const shouldRedact = emitterAgent?.redacted === 1 || peerAgent?.redacted === 1;
 					storedComm = repos.comms.upsert({
 						agent_id: agentId,
 						comm_id: comm.commId,
@@ -244,7 +291,7 @@ export class AgentService {
 						message_id: comm.messageId,
 						reply_to: comm.replyTo,
 						expects_reply: comm.expectsReply,
-						text: comm.text,
+						text: shouldRedact ? null : comm.text,
 						truncated: comm.truncated,
 						delivered: comm.delivered ?? null,
 						at: comm.at,
@@ -263,7 +310,7 @@ export class AgentService {
 					const name = (e.name ?? e.sessionName) as string | undefined;
 					if (typeof name === "string") {
 						repos.agents.setSession(agentId, name);
-						this.resolveUnresolvedComms();
+						this.resolveUnresolvedComms(repos.agents.get(agentId));
 						agentChanged = true;
 					}
 					break;
@@ -297,8 +344,8 @@ export class AgentService {
 		if (!inserted) return;
 
 		if (storedComm) {
-			this.c().mesh.onComm(storedComm);
 			this.c().mesh.invalidate();
+			this.c().mesh.onComm(storedComm);
 		} else if (agentChanged || e.type === "todo_update" || e.type === "subagent_update") {
 			this.c().mesh.invalidate();
 		}
@@ -306,9 +353,12 @@ export class AgentService {
 		if (e.type === "agent_settled") {
 			if (!e.aborted) dispatcher.settled(agentId, repos.agents.get(agentId)?.last_preview ?? null);
 		} else if (e.type === "terminal_wait") {
-			const title = typeof e.title === "string" ? e.title : null;
+			const redacted = repos.agents.get(agentId)?.redacted === 1;
+			const title = redacted ? null : typeof e.title === "string" ? e.title : null;
 			const active = e.active === true;
-			hub.broadcastApps(envelope("terminal_wait", { agentId, kind: e.kind as string | undefined, title, active }));
+			hub.broadcastApps(envelope("terminal_wait", { agentId, kind: e.kind as string | undefined, title, active }), {
+				mode: "foreground",
+			});
 			if (active) dispatcher.terminalWait(agentId, title);
 			else dispatcher.terminalWaitCleared(agentId);
 		}
@@ -366,15 +416,15 @@ export class AgentService {
 		this.clearGrace(agentId);
 		const t = setTimeout(() => {
 			this.graceTimers.delete(agentId);
-			const { hub, prompts } = this.c();
-			if (hub.agents.has(agentId)) return;
+			const { repos, hub, prompts } = this.c();
+			if (!repos.db.open || hub.agents.has(agentId)) return;
 			prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
 		}, ms);
 		t.unref();
 		this.graceTimers.set(agentId, t);
 	}
 
-	private clearGrace(agentId: string): void {
+	clearGrace(agentId: string): void {
 		const t = this.graceTimers.get(agentId);
 		if (t) clearTimeout(t);
 		this.graceTimers.delete(agentId);
@@ -485,9 +535,7 @@ export class AgentService {
 			messages.forget(agentId);
 			return true;
 		}
-		if (!this.archive(agentId)) return false;
-		messages.forget(agentId);
-		return true;
+		return this.archive(agentId);
 	}
 
 	dispose(): void {

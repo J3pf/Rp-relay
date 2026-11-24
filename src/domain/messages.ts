@@ -14,6 +14,7 @@ export interface SendUserMessage {
 }
 
 const KEEP = 500;
+const MAX_DONE_AGENTS = 2_000;
 
 /** Enrutamiento de mensajes de usuario con idempotencia por `clientMsgId` (RESILIENCIA §3.2). */
 export class MessageService {
@@ -34,8 +35,13 @@ export class MessageService {
 		const { repos, hub, config } = this.c();
 		const agent = repos.agents.get(m.agentId);
 		if (!agent) throw new RelayError("not_found", "agente desconocido");
-		const cached = this.done.get(m.agentId)?.get(m.clientMsgId);
-		if (cached) return cached;
+		const perAgent = this.done.get(m.agentId);
+		const cached = perAgent?.get(m.clientMsgId);
+		if (cached) {
+			this.done.delete(m.agentId);
+			this.done.set(m.agentId, perAgent!);
+			return cached;
+		}
 		const k = this.key(m.agentId, m.clientMsgId);
 		const inflight = this.pending.get(k);
 		if (inflight) return inflight;
@@ -96,10 +102,18 @@ export class MessageService {
 		const k = this.key(agentId, ack.clientMsgId);
 		if (ack.disposition !== "rejected" && !ack.error) {
 			let per = this.done.get(agentId);
-			if (!per) {
+			if (per) {
+				this.done.delete(agentId);
+			} else {
 				per = new Map();
-				this.done.set(agentId, per);
 			}
+			this.done.set(agentId, per);
+			while (this.done.size > MAX_DONE_AGENTS) {
+				const oldest = this.done.keys().next().value;
+				if (oldest === undefined) break;
+				this.done.delete(oldest);
+			}
+			if (per.has(ack.clientMsgId)) per.delete(ack.clientMsgId);
 			per.set(ack.clientMsgId, ack);
 			while (per.size > KEEP) per.delete(per.keys().next().value!);
 		}
