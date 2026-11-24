@@ -47,13 +47,24 @@ export interface RelayOptions {
 	noTimers?: boolean;
 }
 
+function chmodDbFiles(dbFile: string): void {
+	for (const file of [dbFile, `${dbFile}-wal`, `${dbFile}-shm`]) {
+		if (!existsSync(file)) continue;
+		try {
+			chmodSync(file, 0o600);
+		} catch {
+			// sistemas de archivos sin permisos POSIX
+		}
+	}
+}
+
 /** Ensambla y ejecuta el relay: DB, servicios, HTTP, WebSockets y tareas periódicas. */
 export class Relay {
 	readonly ctx: Ctx;
 	readonly db: DB;
-	private app!: FastifyInstance;
-	private ws!: { close(): void };
-	private longPoll!: LongPollRegistry;
+	private app?: FastifyInstance;
+	private ws?: { close(): void };
+	private longPoll?: LongPollRegistry;
 	private timers: NodeJS.Timeout[] = [];
 	private acme: AcmeChallengeServer | null = null;
 	private stopped = false;
@@ -76,11 +87,7 @@ export class Relay {
 		mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
 		const dbFile = dbPath(config);
 		const db = openDb(dbFile);
-		try {
-			chmodSync(dbFile, 0o600);
-		} catch {
-			// sistemas de archivos sin permisos POSIX
-		}
+		chmodDbFiles(dbFile);
 		migrate(db, {
 			beforeApply: (pending) => {
 				// reversibilidad: copia previa a aplicar migraciones sobre una base con datos
@@ -93,6 +100,7 @@ export class Relay {
 		});
 		const repos = new Repos(db);
 		repos.meta.relayId();
+		chmodDbFiles(dbFile);
 		ensureAdminToken(config);
 
 		const ctx = {} as Ctx;
@@ -143,7 +151,7 @@ export class Relay {
 
 	/** Dirección real tras `start()` (útil con puerto 0). */
 	get address(): { host: string; port: number } {
-		const a = this.app.server.address() as AddressInfo;
+		const a = this.app!.server.address() as AddressInfo;
 		return { host: a.address, port: a.port };
 	}
 	get baseUrl(): string {
@@ -155,31 +163,71 @@ export class Relay {
 		return this.baseUrl.replace(/^http/, "ws");
 	}
 
+	private clearTimers(): void {
+		for (const t of this.timers) {
+			clearInterval(t);
+			clearTimeout(t);
+		}
+		this.timers = [];
+	}
+
 	async start(): Promise<void> {
 		const { config, log, ctx } = this;
-		let tlsMaterial: { key: Buffer; cert: Buffer } | undefined;
-		if (config.tls) {
-			if (isFileTls(config.tls)) tlsMaterial = loadFileTls(config.tls);
-			else {
-				this.acme = new AcmeChallengeServer(config.publicUrl, log);
-				await this.acme.listen(config.listen.httpPort ?? 80);
-				tlsMaterial = await ensureAcmeCert(config, this.acme, log);
+		try {
+			let tlsMaterial: { key: Buffer; cert: Buffer } | undefined;
+			if (config.tls) {
+				if (isFileTls(config.tls)) tlsMaterial = loadFileTls(config.tls);
+				else {
+					this.acme = new AcmeChallengeServer(config.publicUrl, log);
+					await this.acme.listen(config.listen.httpPort ?? 80);
+					tlsMaterial = await ensureAcmeCert(config, this.acme, log);
+				}
+				this.tlsActive = true;
 			}
-			this.tlsActive = true;
+
+			this.longPoll = new LongPollRegistry(() => ctx);
+			this.app = await buildHttp({ config, log, c: () => ctx, longPoll: this.longPoll, https: tlsMaterial });
+			this.ws = attachWebSockets(this.app.server, () => ctx);
+			ctx.agents.boot();
+			await this.app.listen({ host: config.listen.host, port: config.listen.port });
+			log.info(
+				{ ...this.address, tls: this.tlsActive, fcm: ctx.dispatcher.fcmEnabled, apns: ctx.dispatcher.apnsEnabled },
+				"rp-relay escuchando",
+			);
+
+			if (!this.opts.noTimers) this.startTimers();
+			sdNotify("READY=1", `STATUS=escuchando en ${this.address.port}`);
+		} catch (err) {
+			await this.cleanupPartialStart();
+			throw err;
 		}
+	}
 
-		this.longPoll = new LongPollRegistry(() => ctx);
-		this.app = await buildHttp({ config, log, c: () => ctx, longPoll: this.longPoll, https: tlsMaterial });
-		this.ws = attachWebSockets(this.app.server, () => ctx);
-		ctx.agents.boot();
-		await this.app.listen({ host: config.listen.host, port: config.listen.port });
-		log.info(
-			{ ...this.address, tls: this.tlsActive, fcm: ctx.dispatcher.fcmEnabled, apns: ctx.dispatcher.apnsEnabled },
-			"rp-relay escuchando",
-		);
-
-		if (!this.opts.noTimers) this.startTimers();
-		sdNotify("READY=1", `STATUS=escuchando en ${this.address.port}`);
+	private async cleanupPartialStart(): Promise<void> {
+		this.clearTimers();
+		const run = async (step: string, fn: () => void | Promise<void>) => {
+			try {
+				await fn();
+			} catch (e) {
+				this.log.warn(
+					{ step, err: e instanceof Error ? e.message : String(e) },
+					"error limpiando arranque parcial de rp-relay",
+				);
+			}
+		};
+		const ws = this.ws;
+		this.ws = undefined;
+		if (ws) await run("ws", () => ws.close());
+		const app = this.app;
+		this.app = undefined;
+		if (app) await run("app", () => app.close());
+		const longPoll = this.longPoll;
+		this.longPoll = undefined;
+		if (longPoll) await run("longPoll", () => longPoll.dispose());
+		const acme = this.acme;
+		this.acme = null;
+		if (acme) await run("acme", () => acme.close());
+		this.tlsActive = false;
 	}
 
 	private every(ms: number, fn: () => void | Promise<void>): void {
@@ -187,8 +235,9 @@ export class Relay {
 		const t = setInterval(() => {
 			if (running) return;
 			running = true;
-			Promise.resolve(fn())
-				.catch((e) => this.log.warn({ err: (e as Error).message }, "tarea periódica fallida"))
+			Promise.resolve()
+				.then(fn)
+				.catch((e) => this.log.warn({ err: e instanceof Error ? e.message : String(e) }, "tarea periódica fallida"))
 				.finally(() => {
 					running = false;
 				});
@@ -244,7 +293,7 @@ export class Relay {
 
 	private setSecureContext(options: { key: Buffer; cert: Buffer }): void {
 		// SAFETY: The app server is a TLS server in the renewal branches that call this method.
-		const server = this.app.server as unknown as {
+		const server = this.app!.server as unknown as {
 			setSecureContext(options: Record<string, unknown>): void;
 		};
 		server.setSecureContext(options);
@@ -252,8 +301,8 @@ export class Relay {
 
 	backup(): string {
 		const dir = backupsDir(this.config);
-		const pruned = pruneBackups(dir, this.config.backup.keepDays);
 		const f = backupNow(this.db, dir);
+		const pruned = pruneBackups(dir, this.config.backup.keepDays);
 		this.log.info({ file: f, pruned }, "copia de seguridad creada");
 		return f;
 	}
@@ -264,26 +313,45 @@ export class Relay {
 		this.stopped = true;
 		const { ctx, log } = this;
 		sdNotify("STOPPING=1");
-		for (const t of this.timers) {
-			clearInterval(t);
-			clearTimeout(t);
-		}
-		this.timers = [];
+		this.clearTimers();
+		const runStep = async (step: string, fn: () => void | Promise<void>) => {
+			try {
+				await fn();
+			} catch (e) {
+				log.warn({ step, err: e instanceof Error ? e.message : String(e) }, "error durante el cierre de rp-relay");
+			}
+		};
 		try {
 			// persistir el último seq visto de cada agente conectado antes de cerrar el hub
-			for (const c of ctx.hub.agents.values()) if (c.agentId) ctx.repos.agents.setSeq(c.agentId, c.lastSeq);
-			this.longPoll?.dispose();
-			ctx.hub.closeAll(CloseCode.ServiceRestart, "service restart");
+			await runStep("persist_seqs", () => {
+				for (const c of ctx.hub.agents.values()) {
+					if (!c.agentId) continue;
+					try {
+						ctx.repos.agents.setSeq(c.agentId, c.lastSeq);
+					} catch (e) {
+						log.warn(
+							{ step: "persist_seqs", agentId: c.agentId, err: e instanceof Error ? e.message : String(e) },
+							"error persistiendo secuencia de agente",
+						);
+					}
+				}
+			});
+			await runStep("longPoll", () => this.longPoll?.dispose());
+			await runStep("hub", () => ctx.hub.closeAll(CloseCode.ServiceRestart, "service restart"));
 			// dar un instante a que los close frames salgan antes de cerrar los sockets
 			await new Promise((r) => setTimeout(r, 150));
-			this.ws?.close();
-			await this.app?.close();
-			await this.acme?.close();
-			ctx.agents.dispose();
-			ctx.messages.dispose();
-			ctx.mesh.dispose();
-			ctx.hosts.dispose();
-			ctx.dispatcher.close();
+			await runStep("ws", () => this.ws?.close());
+			await runStep("app", async () => {
+				await this.app?.close();
+			});
+			await runStep("acme", async () => {
+				await this.acme?.close();
+			});
+			await runStep("agents", () => ctx.agents.dispose());
+			await runStep("messages", () => ctx.messages.dispose());
+			await runStep("mesh", () => ctx.mesh.dispose());
+			await runStep("hosts", () => ctx.hosts.dispose());
+			await runStep("dispatcher", () => ctx.dispatcher.close());
 		} finally {
 			try {
 				this.db.pragma("wal_checkpoint(TRUNCATE)");

@@ -35,6 +35,8 @@ export interface ApnsHttp2Client {
 	off(event: "error", listener: (error: Error) => void): this;
 	once(event: "error", listener: (error: Error) => void): this;
 	once(event: "close" | "goaway", listener: () => void): this;
+	setTimeout?(msecs: number, callback: () => void): void;
+	destroy?(error?: Error): void;
 	closed?: boolean;
 	destroyed?: boolean;
 	close(): void;
@@ -43,6 +45,8 @@ export interface ApnsHttp2Client {
 export interface ApnsSenderOptions {
 	now?: () => number;
 	clientFactory?: (authority: string) => ApnsHttp2Client;
+	timeoutMs?: number;
+	idleTimeoutMs?: number;
 }
 
 export interface ApnsConfig {
@@ -56,6 +60,7 @@ export interface ApnsConfig {
 export const APNS_BAD_TOKEN = "Unregistered";
 export const BAD_DEVICE_TOKEN = "BadDeviceToken";
 const APNS_TIMEOUT_MS = 10_000;
+const APNS_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 /** Prefix-truncates at a Unicode code-point boundary, with an absolute 64-byte APNs header limit. */
 export function fitApnsCollapseId(value: string): string {
@@ -102,21 +107,35 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 	// Validate the ES256 private key at startup so invalid PEM files fail fast.
 	providerToken(config, privateKey, now());
 	const clientFactory = options.clientFactory ?? ((authority) => connect(authority) as unknown as ApnsHttp2Client);
+	const timeoutMs = options.timeoutMs ?? APNS_TIMEOUT_MS;
+	const idleTimeoutMs = options.idleTimeoutMs ?? APNS_IDLE_TIMEOUT_MS;
 	const sessions = new Map<string, ApnsHttp2Client>();
+	const destroySession = (session: ApnsHttp2Client): void => {
+		try {
+			if (typeof session.destroy === "function") session.destroy();
+			else session.close();
+		} catch {
+			// ignore destroy/close errors on broken session
+		}
+	};
+	const evictSession = (authority: string, session: ApnsHttp2Client, destroy = false): void => {
+		if (sessions.get(authority) === session) sessions.delete(authority);
+		if (destroy) destroySession(session);
+	};
 	const getSession = (authority: string): ApnsHttp2Client => {
 		const existing = sessions.get(authority);
 		if (existing && !existing.closed && !existing.destroyed) return existing;
 		const session = clientFactory(authority);
-		const evict = () => {
-			if (sessions.get(authority) === session) sessions.delete(authority);
-		};
+		const evictAndDestroy = () => evictSession(authority, session, true);
+		const evictOnly = () => evictSession(authority, session, false);
 		if (typeof session.on === "function") {
-			session.on("error", evict);
+			session.on("error", evictAndDestroy);
 		} else {
-			session.once("error", evict);
+			session.once("error", evictAndDestroy);
 		}
-		session.once?.("close", evict);
-		session.once?.("goaway", evict);
+		session.once?.("close", evictOnly);
+		session.once?.("goaway", evictAndDestroy);
+		session.setTimeout?.(idleTimeoutMs, evictAndDestroy);
 		sessions.set(authority, session);
 		return session;
 	};
@@ -135,8 +154,13 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 		return new Promise<void>((resolve, reject) => {
 			let status = 0;
 			let settled = false;
+			let timer: NodeJS.Timeout | undefined;
 			const chunks: Buffer[] = [];
 			const cleanup = () => {
+				if (timer !== undefined) {
+					clearTimeout(timer);
+					timer = undefined;
+				}
 				session.off?.("error", fail);
 			};
 			const fail = (error: Error) => {
@@ -158,12 +182,7 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 					"apns-priority": String(msg.headers.priority),
 				});
 			} catch (err) {
-				if (sessions.get(authority) === session) sessions.delete(authority);
-				try {
-					session.close();
-				} catch {
-					// ignore close errors on broken session
-				}
+				evictSession(authority, session, true);
 				reject(err as Error);
 				return;
 			}
@@ -204,13 +223,21 @@ export function createApnsSender(config: ApnsConfig, options: ApnsSenderOptions 
 							: (reason ?? "apns/rejected");
 				fail(new ApnsError(code, status, reason ?? `APNs HTTP ${status}: ${body}`));
 			});
-			const timer = setTimeout(() => {
-				req.close();
+			timer = setTimeout(() => {
 				fail(new ApnsError("apns/timeout", 0, "timeout al enviar APNs"));
-			}, APNS_TIMEOUT_MS);
+				evictSession(authority, session, true);
+				try {
+					req.close();
+				} catch {
+					// ignore stream close errors
+				}
+			}, timeoutMs);
 			timer.unref();
 			req.once("close", () => {
-				clearTimeout(timer);
+				if (!settled) {
+					fail(new ApnsError("apns/stream-closed", status, "stream APNs cerrado prematuramente"));
+					return;
+				}
 				cleanup();
 			});
 			req.end(JSON.stringify(msg.payload));

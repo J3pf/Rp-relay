@@ -276,10 +276,21 @@ export class LongPollRegistry {
 
 	private sweep(): void {
 		const now = Date.now();
-		for (const [id, e] of this.sessions) {
+		for (const [id, e] of [...this.sessions]) {
 			if (e.conn.closed || now - e.conn.lastActivity > this.idleMs || now - e.conn.lastPollAt > this.idleMs * 2) {
-				e.conn.close(CloseCode.Normal, "idle");
-				this.drop(id, e);
+				try {
+					e.conn.close(CloseCode.Normal, "idle");
+					this.drop(id, e);
+				} catch (err) {
+					try {
+						this.c().log.warn(
+							{ err: err instanceof Error ? err.message : String(err), agentId: id },
+							"error limpiando sesión long-poll inactiva",
+						);
+					} catch {
+						// ignore logger errors during teardown
+					}
+				}
 			}
 		}
 	}

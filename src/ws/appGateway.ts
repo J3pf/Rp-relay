@@ -105,6 +105,18 @@ export class AppSession {
 		this.conn.send(envelope(t, d, env.id ? { re: env.id } : {}));
 	}
 
+	private handleAsyncError(env: Envelope, e: unknown): void {
+		if (e instanceof RelayError) {
+			this.conn.send(errorEnvelope(e.code, e.message, env.id, e.reason));
+		} else {
+			this.c().log.warn(
+				{ err: e instanceof Error ? e.message : String(e), t: env.t, deviceId: this.device.id },
+				"error procesando mensaje asíncrono de la app",
+			);
+			this.conn.send(errorEnvelope(ErrorCode.Internal, "error interno", env.id));
+		}
+	}
+
 	private dispatch(env: Envelope): void {
 		const ctx = this.c();
 		const { repos, hub, summaries, history, messages, prompts, dispatcher, hosts, agents, config } = ctx;
@@ -181,10 +193,7 @@ export class AppSession {
 				messages
 					.send(this.device.id, { agentId, ...rest })
 					.then((ack) => this.reply(env, "user.message.ack", ack))
-					.catch((e) => {
-						if (e instanceof RelayError) this.conn.send(errorEnvelope(e.code, e.message, env.id, e.reason));
-						else this.conn.send(errorEnvelope(ErrorCode.Internal, "error interno", env.id));
-					});
+					.catch((e) => this.handleAsyncError(env, e));
 				return;
 			}
 			case "agent.abort": {
@@ -198,10 +207,7 @@ export class AppSession {
 				agents
 					.close(d.agentId)
 					.then(() => this.reply(env, "ack"))
-					.catch((e) => {
-						if (e instanceof RelayError) this.conn.send(errorEnvelope(e.code, e.message, env.id, e.reason));
-						else this.conn.send(errorEnvelope(ErrorCode.Internal, "error interno", env.id));
-					});
+					.catch((e) => this.handleAsyncError(env, e));
 				return;
 			}
 			case "agent.archived": {

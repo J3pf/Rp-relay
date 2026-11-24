@@ -37,12 +37,13 @@ COPY --from=build /app/migrations ./migrations
 RUN chmod +x /app/dist/cli/index.js \
     && ln -s /app/dist/cli/index.js /usr/local/bin/rp-relay \
     && mkdir -p /var/lib/rp-relay \
+    && chmod 700 /var/lib/rp-relay \
     && chown -R node:node /var/lib/rp-relay
 USER node
 VOLUME /var/lib/rp-relay
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "const tls=Boolean(process.env.RP_TLS_CERT||process.env.RP_ACME_DOMAIN);const port=process.env.RP_LISTEN_PORT||8787;if(tls)process.env.NODE_TLS_REJECT_UNAUTHORIZED='0';fetch((tls?'https':'http')+'://127.0.0.1:'+port+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/bin/tini", "--", "node", "dist/cli/index.js"]
 CMD ["serve"]

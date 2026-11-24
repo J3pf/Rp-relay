@@ -15,6 +15,15 @@ function resolveVersion(): string {
 
 export const VERSION = resolveVersion();
 
-export function registerHealth(app: FastifyInstance, _c: () => Ctx): void {
-	app.get("/healthz", async () => ({ ok: true, version: VERSION, uptime: Math.round(process.uptime()) }));
+export function registerHealth(app: FastifyInstance, c: () => Ctx): void {
+	app.get("/healthz", async (_req, reply) => {
+		const uptime = Math.round(process.uptime());
+		try {
+			c().repos.db.prepare("SELECT 1").get();
+			return { ok: true, version: VERSION, uptime };
+		} catch (e) {
+			c().log.warn({ err: e instanceof Error ? e.message : String(e) }, "fallo en comprobación de salud de SQLite");
+			return reply.code(503).send({ ok: false, version: VERSION, uptime });
+		}
+	});
 }

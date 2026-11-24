@@ -31,6 +31,54 @@ const TTL_PROMPT = HOUR;
 const TTL_OTHER = 10 * MINUTE;
 const MAX_BODY_BYTES = 3000;
 const APNS_MAX_BODY_BYTES = 2900;
+const DEFAULT_PUSH_RETRY_DELAY_MS = 100;
+
+export interface PushDispatcherOptions {
+	retryDelayMs?: number;
+}
+
+function isRetryableApnsError(err: { code?: string; status?: number }): boolean {
+	if (err.code === "apns/timeout" || err.code === "apns/stream-closed") return true;
+	const status = err.status ?? 0;
+	return status === 429 || status >= 500;
+}
+
+function isRetryableFcmError(err: { code?: string; status?: number }): boolean {
+	if (
+		err.code === "messaging/internal-error" ||
+		err.code === "messaging/server-unavailable" ||
+		err.code === "messaging/timeout"
+	) {
+		return true;
+	}
+	const status = err.status ?? 0;
+	return status === 429 || status >= 500;
+}
+
+function jitteredDelayMs(baseMs: number): number {
+	if (baseMs <= 0) return 0;
+	return Math.max(1, Math.round(baseMs * (0.5 + Math.random() * 0.5)));
+}
+
+async function sendWithRetry(
+	send: () => Promise<void>,
+	isRetryable: (err: { code?: string; status?: number }) => boolean,
+	retryDelayMs: number,
+): Promise<void> {
+	try {
+		await send();
+	} catch (firstErr) {
+		if (!isRetryable(firstErr as { code?: string; status?: number })) throw firstErr;
+		const delay = jitteredDelayMs(retryDelayMs);
+		if (delay > 0) {
+			await new Promise<void>((resolve) => {
+				const t = setTimeout(resolve, delay);
+				t.unref();
+			});
+		}
+		await send();
+	}
+}
 
 /**
  * Fits the serialized body to its channel budget. Preserve the legacy trim order (message, options, title), then
@@ -140,15 +188,18 @@ export function buildApnsPayload(pushKey: Buffer, kind: PushKindName, body: Reco
 export class PushDispatcher {
 	private fcm: FcmSender | null;
 	private apns: ApnsSender | null;
+	private retryDelayMs: number;
 
 	constructor(
 		private c: () => Ctx,
 		private log: Logger,
 		fcm: FcmSender | null = null,
 		apns: ApnsSender | null = null,
+		opts: PushDispatcherOptions = {},
 	) {
 		this.fcm = fcm;
 		this.apns = apns;
+		this.retryDelayMs = opts.retryDelayMs ?? DEFAULT_PUSH_RETRY_DELAY_MS;
 	}
 
 	setFcm(sender: FcmSender | null): void {
@@ -213,70 +264,43 @@ export class PushDispatcher {
 		void this.fanOut("cancel", promptId, { promptId }, null, { exclude: excludeDevice ?? undefined });
 	}
 
-	settled(agentId: string, preview: string | null): void {
+	private notifyAgentEvent(
+		agentId: string,
+		kind: "settled" | "error" | "terminal_wait",
+		field: "preview" | "detail" | "title",
+		value: string | null,
+	): void {
 		const { repos, summaries } = this.c();
 		const a = repos.agents.get(agentId);
 		const m = a ? repos.machines.get(a.machine_id) : undefined;
 		if (!a || a.archived_at !== null || !m) return;
 		const redacted = a.redacted === 1;
 		void this.fanOut(
-			"settled",
+			kind,
 			agentId,
 			{
 				agentId,
 				agentLabel: summaries.agentLabel(a),
-				preview: redacted ? null : preview,
+				[field]: redacted ? null : value,
 				machineId: m.id,
 				machineName: m.name,
 				machineContext: m.context,
 				...(redacted ? { redacted: true } : {}),
 			},
-			{ machineId: m.id, category: "settled", agentId },
+			{ machineId: m.id, category: kind, agentId },
 		);
+	}
+
+	settled(agentId: string, preview: string | null): void {
+		this.notifyAgentEvent(agentId, "settled", "preview", preview);
 	}
 
 	agentError(agentId: string, detail: string | null): void {
-		const { repos, summaries } = this.c();
-		const a = repos.agents.get(agentId);
-		const m = a ? repos.machines.get(a.machine_id) : undefined;
-		if (!a || a.archived_at !== null || !m) return;
-		const redacted = a.redacted === 1;
-		void this.fanOut(
-			"error",
-			agentId,
-			{
-				agentId,
-				agentLabel: summaries.agentLabel(a),
-				detail: redacted ? null : detail,
-				machineId: m.id,
-				machineName: m.name,
-				machineContext: m.context,
-				...(redacted ? { redacted: true } : {}),
-			},
-			{ machineId: m.id, category: "error", agentId },
-		);
+		this.notifyAgentEvent(agentId, "error", "detail", detail);
 	}
 
 	terminalWait(agentId: string, title: string | null): void {
-		const { repos, summaries } = this.c();
-		const a = repos.agents.get(agentId);
-		const m = a ? repos.machines.get(a.machine_id) : undefined;
-		if (!a || a.archived_at !== null || !m) return;
-		const redacted = a.redacted === 1;
-		void this.fanOut(
-			"terminal_wait",
-			agentId,
-			{
-				agentId,
-				agentLabel: summaries.agentLabel(a),
-				title: redacted ? null : title,
-				machineId: m.id,
-				machineName: m.name,
-				machineContext: m.context,
-				...(redacted ? { redacted: true } : {}),
-			},
-			{ machineId: m.id, category: "terminal_wait", agentId },
-		);
+		this.notifyAgentEvent(agentId, "terminal_wait", "title", title);
 	}
 
 	terminalWaitCleared(agentId: string): void {
@@ -383,40 +407,57 @@ export class PushDispatcher {
 		}
 
 		if (this.fcm && d.fcm_token) {
+			const fcm = this.fcm;
+			const fcmToken = d.fcm_token;
 			try {
 				const enc = encryptPush(d.push_key, full);
-				await this.fcm.send({
-					token: d.fcm_token,
+				const fcmMsg = {
+					token: fcmToken,
 					data: { v: "1", k: kind, n: enc.n, c: enc.c },
-					android: { priority: kind === "prompt" || kind === "test" ? "high" : "normal", ttl, collapseKey: ref },
-				});
+					android: {
+						priority: kind === "prompt" || kind === "test" ? ("high" as const) : ("normal" as const),
+						ttl,
+						collapseKey: ref,
+					},
+				};
+				await sendWithRetry(() => fcm.send(fcmMsg), isRetryableFcmError, this.retryDelayMs);
 				res.fcm = "sent";
 			} catch (e) {
 				res.fcm = "failed";
-				const err = e as { code?: string; message?: string };
+				const err = e as { code?: string; status?: number; message?: string };
 				res.error = err.message;
 				if (err.code === FCM_UNREGISTERED) {
 					repos.devices.clearFcm(d.id);
 					this.log.info({ deviceId: d.id }, "token FCM no registrado: eliminado");
-				} else this.log.warn({ deviceId: d.id, code: err.code }, "fallo al enviar FCM");
+				} else {
+					this.log.warn(
+						{ deviceId: d.id, code: err.code, status: err.status, err: err.message },
+						"fallo al enviar FCM",
+					);
+				}
 			}
 		}
 
 		if (this.apns && d.apns_token) {
+			const apns = this.apns;
+			const apnsToken = d.apns_token;
 			try {
 				const apnsConfig = this.c().config.apns;
 				const environment = d.apns_env ?? apnsConfig?.env ?? "production";
-				await this.apns.send({
-					host: environment === "sandbox" ? "api.development.push.apple.com" : "api.push.apple.com",
-					token: d.apns_token,
+				const apnsMsg = {
+					host: (environment === "sandbox" ? "api.development.push.apple.com" : "api.push.apple.com") as
+						| "api.push.apple.com"
+						| "api.development.push.apple.com",
+					token: apnsToken,
 					payload: buildApnsPayload(d.push_key, kind, full),
 					headers: {
 						topic: apnsConfig?.bundleId ?? "",
 						collapseId: fitApnsCollapseId(ref),
 						pushType: "alert",
-						priority: kind === "prompt" || kind === "test" ? 10 : 5,
+						priority: kind === "prompt" || kind === "test" ? (10 as const) : (5 as const),
 					},
-				});
+				};
+				await sendWithRetry(() => apns.send(apnsMsg), isRetryableApnsError, this.retryDelayMs);
 				res.apns = "sent";
 			} catch (e) {
 				res.apns = "failed";
@@ -425,7 +466,12 @@ export class PushDispatcher {
 				if (err.code === APNS_BAD_TOKEN || err.code === BAD_DEVICE_TOKEN || err.status === 410) {
 					repos.devices.clearApns(d.id);
 					this.log.info({ deviceId: d.id, status: err.status }, "token APNs no registrado: eliminado");
-				} else this.log.warn({ deviceId: d.id, code: err.code }, "fallo al enviar APNs");
+				} else {
+					this.log.warn(
+						{ deviceId: d.id, code: err.code, status: err.status, err: err.message },
+						"fallo al enviar APNs",
+					);
+				}
 			}
 		}
 		return res;
