@@ -1,6 +1,16 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	PushCancelBody,
+	PushChannelReq,
+	PushErrorBody,
+	PushPromptBody,
+	PushSettledBody,
+	PushTerminalWaitBody,
+	PushTestBody,
+	validateSchema,
+} from "@j3pf/rp-protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { ApnsError, BAD_DEVICE_TOKEN } from "../src/push/apns.js";
@@ -61,6 +71,34 @@ describe("cifrado de push", () => {
 		expect(body.promptId).toBe("P1");
 		expect(body.message.endsWith("…")).toBe(true);
 	});
+	it("PushChannelReq y los cuerpos push de @j3pf/rp-protocol validan apnsToken y campos opcionales emitidos", () => {
+		expect(validateSchema(PushChannelReq, { direct: true, apnsToken: "a".repeat(64) }).ok).toBe(true);
+		expect(validateSchema(PushChannelReq, { direct: true, apnsToken: "" }).ok).toBe(true);
+		expect(validateSchema(PushChannelReq, { direct: true, apnsToken: null }).ok).toBe(true);
+		expect(validateSchema(PushChannelReq, { direct: true, apnsToken: "not-hex" }).ok).toBe(false);
+		expect(validateSchema(PushChannelReq, { direct: true, apnsToken: "A".repeat(64) }).ok).toBe(false);
+
+		expect(PushPromptBody.properties).toHaveProperty("pushId");
+		expect(PushPromptBody.properties).toHaveProperty("redacted");
+		expect(PushCancelBody.properties).toHaveProperty("pushId");
+		expect(PushSettledBody.properties).toHaveProperty("pushId");
+		expect(PushSettledBody.properties).toHaveProperty("redacted");
+		expect(PushErrorBody.properties).toHaveProperty("pushId");
+		expect(PushErrorBody.properties).toHaveProperty("redacted");
+		expect(PushTerminalWaitBody.properties).toHaveProperty("pushId");
+		expect(PushTerminalWaitBody.properties).toHaveProperty("redacted");
+		expect(PushTestBody.properties).toHaveProperty("pushId");
+		expect(PushTestBody.properties).toHaveProperty("relayTime");
+
+		expect(
+			validateSchema(PushTestBody, {
+				message: "ok",
+				pushId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+				relayTime: 1_700_000_000_000,
+			}).ok,
+		).toBe(true);
+		expect(validateSchema(PushTestBody, { message: "ok" }).ok).toBe(true);
+	});
 });
 
 describe("preferencias de notificación", () => {
@@ -96,9 +134,9 @@ describe("preferencias de notificación", () => {
 		expect(inQuietHours(q, Date.parse("2026-10-13T12:30:00Z"))).toBe(true); // 07:30 Bogotá
 		expect(inQuietHours({ from: "09:00", to: "17:00" }, Date.parse("2026-10-13T12:00:00Z"))).toBe(true);
 		expect(inQuietHours({ from: "09:00", to: "17:00" }, Date.parse("2026-10-13T18:00:00Z"))).toBe(false);
-		expect(inQuietHours({ from: "09:00", to: "09:00" }, Date.now())).toBe(false);
-		expect(inQuietHours({ from: "00:00", to: "23:59", tz: "No/Existe" }, Date.now())).toBe(true); // tz inválida → UTC
-		expect(inQuietHours(null, Date.now())).toBe(false);
+		expect(inQuietHours({ from: "09:00", to: "09:00" }, base.now)).toBe(false);
+		expect(inQuietHours({ from: "00:00", to: "23:59", tz: "No/Existe" }, base.now)).toBe(true); // tz inválida → UTC
+		expect(inQuietHours(null, base.now)).toBe(false);
 	});
 	it("horas silenciosas de la PC por defecto, sobrescritas por las del dispositivo", () => {
 		const quiet = { from: "00:00", to: "23:59" };
@@ -270,8 +308,13 @@ describe("canal FCM", () => {
 		const dev = await pairDevice(t);
 		await enableFcm(dev);
 		const m = await pairMachine(t);
+		const fmtUtc = (ms: number) => {
+			const d = new Date(ms);
+			return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+		};
+		const nowMs = Date.now();
 		await api(t, "PATCH", `/v1/machines/${m.machineId}`, dev.deviceToken, {
-			quietHours: { from: "00:00", to: "23:59", tz: "UTC" },
+			quietHours: { from: fmtUtc(nowMs - 60 * 60_000), to: fmtUtc(nowMs + 60 * 60_000), tz: "UTC" },
 		});
 		const agent = await connectAgent(t, m, "q1");
 		agent.client.send("prompt.open", promptBody(agent.agentId, { danger: "high" }));

@@ -31,7 +31,7 @@ export const PushChannelReq = Type.Object({
 	fcmToken: Type.Optional(Nullable(Type.String())),
 	direct: Type.Boolean(),
 	platform: Type.Optional(Type.Union([Type.Literal("android"), Type.Literal("ios")])),
-	apnsToken: Type.Optional(Nullable(Type.String())),
+	apnsToken: Type.Optional(Nullable(Type.Union([Type.Literal(""), Type.String({ pattern: "^[0-9a-f]{64}$" })]))),
 	apnsEnvironment: Type.Optional(Type.Union([Type.Literal("sandbox"), Type.Literal("production")])),
 });
 export const QuietHours = Type.Object({

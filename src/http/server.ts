@@ -1,7 +1,14 @@
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
-import Fastify, { type FastifyInstance, LogController } from "fastify";
+import Fastify, {
+	type FastifyBaseLogger,
+	type FastifyInstance,
+	LogController,
+	type RawReplyDefaultExpression,
+	type RawRequestDefaultExpression,
+	type RawServerDefault,
+} from "fastify";
 import type { Logger } from "pino";
 import { bearer, tokenKind } from "../auth/tokens.js";
 import { registerBlobRoutes } from "../blobs/routes.js";
@@ -26,7 +33,15 @@ export interface BuildHttpOptions {
 	https?: { key: string | Buffer; cert: string | Buffer };
 }
 
-export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
+export type TypeBoxFastifyInstance = FastifyInstance<
+	RawServerDefault,
+	RawRequestDefaultExpression,
+	RawReplyDefaultExpression,
+	FastifyBaseLogger,
+	TypeBoxTypeProvider
+>;
+
+export async function buildHttp(o: BuildHttpOptions): Promise<TypeBoxFastifyInstance> {
 	const { config, log, c } = o;
 	const trustProxy = effectiveTrustProxy(config);
 	const behindProxy = Boolean(trustProxy);
@@ -36,14 +51,13 @@ export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 				? (_address: string, hop: number) => hop < trustProxy
 				: false
 			: trustProxy;
-	// SAFETY: withTypeProvider() changes only the compile-time provider type; the returned value remains the Fastify instance passed to route registrars.
 	const app = Fastify({
-		loggerInstance: log,
+		loggerInstance: log as FastifyBaseLogger,
 		trustProxy: fastifyTrustProxy,
 		bodyLimit: 2 * 1024 * 1024,
 		logController: new LogController({ disableRequestLogging: true }),
 		...(o.https ? { https: o.https } : {}),
-	}).withTypeProvider<TypeBoxTypeProvider>() as unknown as FastifyInstance;
+	}).withTypeProvider<TypeBoxTypeProvider>();
 
 	await app.register(rateLimit, {
 		global: true,

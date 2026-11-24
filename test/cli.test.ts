@@ -264,7 +264,8 @@ describe("CLI contra el relay en marcha (API de administración)", { timeout: 12
 			const r = await cli(["doctor"], env);
 			expect(r.out).toContain("✓ publicUrl alcanzable");
 			expect(r.out).toContain("✓ Reloj");
-			expect(r.out).toContain("sin FCM".slice(0, 0)); // FCM es opcional
+			expect(r.out).toContain("FCM");
+			expect(r.out).toContain("no configurado");
 			expect(r.code).toBe(0);
 		});
 	});

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
+import type { TypeBoxFastifyInstance } from "../server.js";
 
 function resolveVersion(): string {
 	try {
@@ -15,7 +15,7 @@ function resolveVersion(): string {
 
 export const VERSION = resolveVersion();
 
-export function registerHealth(app: FastifyInstance, c: () => Ctx): void {
+export function registerHealth(app: TypeBoxFastifyInstance, c: () => Ctx): void {
 	app.get("/healthz", async (_req, reply) => {
 		const uptime = Math.round(process.uptime());
 		try {

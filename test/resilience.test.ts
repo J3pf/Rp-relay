@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { backupNow, restoreBackup, verifyDb } from "../src/backup/index.js";
@@ -294,14 +295,23 @@ describe("copias de seguridad y restauración", () => {
 	});
 
 	it("restore rechaza copias corruptas o ajenas", () => {
-		const t = join(process.env.TMPDIR ?? "/tmp", `rp-bad-${Date.now()}.db`);
-		writeFileSync(t, "esto no es sqlite");
-		expect(verifyDb(t).ok).toBe(false);
-		expect(() => restoreBackup(t, `${t}.dest`)).toThrow(/no es válida/);
-		const db = openDb(`${t}.other`);
-		db.exec("CREATE TABLE otra(x)");
-		db.close();
-		expect(verifyDb(`${t}.other`)).toMatchObject({ ok: false });
+		const dir = mkdtempSync(join(tmpdir(), "rp-bad-"));
+		try {
+			const badFile = join(dir, "bad.db");
+			writeFileSync(badFile, "esto no es sqlite");
+			expect(verifyDb(badFile).ok).toBe(false);
+			expect(() => restoreBackup(badFile, join(dir, "dest.db"))).toThrow(/no es válida/);
+			const otherFile = join(dir, "other.db");
+			const db = openDb(otherFile);
+			try {
+				db.exec("CREATE TABLE otra(x)");
+			} finally {
+				db.close();
+			}
+			expect(verifyDb(otherFile)).toMatchObject({ ok: false });
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("la migración crea una copia previa cuando hay datos", async () => {
@@ -309,25 +319,31 @@ describe("copias de seguridad y restauración", () => {
 		await pairDevice(t);
 		await t.stop();
 		const { migrate, readMigrations } = await import("../src/db/migrate.js");
-		const { mkdtempSync, writeFileSync } = await import("node:fs");
-		const { tmpdir } = await import("node:os");
 		const mdir = mkdtempSync(join(tmpdir(), "rp-mig-"));
-		for (const mig of readMigrations()) writeFileSync(join(mdir, mig.name), mig.sql);
-		const nextVer = Math.max(...readMigrations().map((m) => m.version)) + 1;
-		const nextName = `${String(nextVer).padStart(4, "0")}_extra.sql`;
-		writeFileSync(join(mdir, nextName), "CREATE TABLE extra (id INTEGER PRIMARY KEY);");
-		const db = openDb(join(t.dir, "relay.db"));
-		let backedUp = false;
-		const applied = migrate(db, {
-			dir: mdir,
-			beforeApply: () => {
-				backedUp = true;
-				backupNow(db, join(t.dir, "backups"));
-			},
-		});
-		db.close();
-		expect(applied).toEqual([nextVer]);
-		expect(backedUp).toBe(true);
-		expect(readdirSync(join(t.dir, "backups")).length).toBe(1);
+		try {
+			for (const mig of readMigrations()) writeFileSync(join(mdir, mig.name), mig.sql);
+			const nextVer = Math.max(...readMigrations().map((m) => m.version)) + 1;
+			const nextName = `${String(nextVer).padStart(4, "0")}_extra.sql`;
+			writeFileSync(join(mdir, nextName), "CREATE TABLE extra (id INTEGER PRIMARY KEY);");
+			const db = openDb(join(t.dir, "relay.db"));
+			let backedUp = false;
+			let applied: number[];
+			try {
+				applied = migrate(db, {
+					dir: mdir,
+					beforeApply: () => {
+						backedUp = true;
+						backupNow(db, join(t.dir, "backups"));
+					},
+				});
+			} finally {
+				db.close();
+			}
+			expect(applied).toEqual([nextVer]);
+			expect(backedUp).toBe(true);
+			expect(readdirSync(join(t.dir, "backups")).length).toBe(1);
+		} finally {
+			rmSync(mdir, { recursive: true, force: true });
+		}
 	});
 });

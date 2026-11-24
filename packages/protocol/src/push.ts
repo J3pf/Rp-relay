@@ -12,6 +12,7 @@ export const PushKind = Type.Union([
 
 /** Cuerpo (descifrado) de `k=prompt` (PROTOCOLO §8.1). */
 export const PushPromptBody = Type.Object({
+	pushId: Type.Optional(Id),
 	promptId: Id,
 	agentId: Id,
 	agentLabel: Type.String(),
@@ -25,35 +26,49 @@ export const PushPromptBody = Type.Object({
 	options: Type.Array(Type.Pick(Option, ["id", "label"])),
 	allowFreeText: Type.Boolean(),
 	danger: Type.Optional(Danger),
+	redacted: Type.Optional(Type.Boolean()),
 });
 export type PushPromptBody = Static<typeof PushPromptBody>;
 
-export const PushCancelBody = Type.Object({ promptId: Id });
+export const PushCancelBody = Type.Object({
+	pushId: Type.Optional(Id),
+	promptId: Id,
+});
 export const PushSettledBody = Type.Object({
+	pushId: Type.Optional(Id),
 	agentId: Id,
 	agentLabel: Type.String(),
 	preview: OptNullable(Type.String()),
 	machineId: Type.Optional(Id),
 	machineName: Type.Optional(Type.String()),
 	machineContext: Type.Optional(Type.String()),
+	redacted: Type.Optional(Type.Boolean()),
 });
 export const PushErrorBody = Type.Object({
+	pushId: Type.Optional(Id),
 	agentId: Id,
 	agentLabel: Type.String(),
 	detail: OptNullable(Type.String()),
 	machineId: Type.Optional(Id),
 	machineName: Type.Optional(Type.String()),
 	machineContext: Type.Optional(Type.String()),
+	redacted: Type.Optional(Type.Boolean()),
 });
 export const PushTerminalWaitBody = Type.Object({
+	pushId: Type.Optional(Id),
 	agentId: Id,
 	agentLabel: Type.String(),
 	title: OptNullable(Type.String()),
 	machineId: Type.Optional(Id),
 	machineName: Type.Optional(Type.String()),
 	machineContext: Type.Optional(Type.String()),
+	redacted: Type.Optional(Type.Boolean()),
 });
-export const PushTestBody = Type.Object({ message: Type.String() });
+export const PushTestBody = Type.Object({
+	pushId: Type.Optional(Id),
+	message: Type.String(),
+	relayTime: Type.Optional(Type.Number()),
+});
 
 /** Mensaje del canal directo: `push.notify` (PROTOCOLO §8). */
 export const PushNotify = Type.Object({

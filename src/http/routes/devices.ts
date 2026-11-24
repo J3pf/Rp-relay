@@ -1,20 +1,13 @@
 import { MachinePatch, NotifyPrefs, PushChannelReq } from "@j3pf/rp-protocol";
 import { Type } from "@sinclair/typebox";
-import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
 import type { DeviceRow } from "../../db/repos/index.js";
-import type { MachinePatchRow } from "../../db/repos/machines.js";
 import { parsePrefs } from "../../push/prefs.js";
 import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
+import type { TypeBoxFastifyInstance } from "../server.js";
 
-/* apnsToken, when present and non-empty, MUST be lowercase hexadecimal, exactly 64 characters (32 bytes, APNs device-token form), no separators: /^[0-9a-f]{64}$/ otherwise 400. Empty string clears (normalize to null). The app client sends hex only (ApnsTokenFormat.hexLowercase); relay never decodes or transforms the value. */
-const DevicePushReq = Type.Intersect([
-	PushChannelReq,
-	Type.Object({
-		apnsToken: Type.Optional(Type.Union([Type.Null(), Type.Literal(""), Type.String({ pattern: "^[0-9a-f]{64}$" })])),
-	}),
-]);
+const IdParams = Type.Object({ id: Type.String() });
 
 const present = (d: DeviceRow, me: string, live: boolean) => ({
 	deviceId: d.id,
@@ -30,14 +23,9 @@ const present = (d: DeviceRow, me: string, live: boolean) => ({
 	connected: live,
 });
 
-export function registerDevices(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
-	app.put("/v1/devices/me/push", { schema: { body: DevicePushReq }, preHandler: auth.device }, async (req) => {
-		const b = req.body as {
-			fcmToken?: string | null;
-			direct: boolean;
-			apnsToken?: string | null;
-			apnsEnvironment?: "sandbox" | "production";
-		};
+export function registerDevices(app: TypeBoxFastifyInstance, c: () => Ctx, auth: HttpAuth): void {
+	app.put("/v1/devices/me/push", { schema: { body: PushChannelReq }, preHandler: auth.device }, async (req) => {
+		const b = req.body;
 		const apnsToken = b.apnsToken === "" ? null : b.apnsToken;
 		const apnsEnvironment: "sandbox" | "production" | null | undefined = apnsToken === null ? null : b.apnsEnvironment;
 		c().repos.devices.setPush(req.device!.id, b.fcmToken, b.direct, apnsToken, apnsEnvironment);
@@ -60,25 +48,25 @@ export function registerDevices(app: FastifyInstance, c: () => Ctx, auth: HttpAu
 		return { devices: repos.devices.list().map((d) => present(d, req.device!.id, hub.appsOfDevice(d.id).length > 0)) };
 	});
 
-	app.delete<{ Params: { id: string } }>("/v1/devices/:id", { preHandler: auth.device }, async (req) => {
+	app.delete("/v1/devices/:id", { schema: { params: IdParams }, preHandler: auth.device }, async (req) => {
 		if (!c().entities.revokeDevice(req.params.id)) throw new RelayError("not_found", "dispositivo no encontrado");
 		return { ok: true };
 	});
 }
 
-export function registerMachines(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
+export function registerMachines(app: TypeBoxFastifyInstance, c: () => Ctx, auth: HttpAuth): void {
 	app.get("/v1/machines", { preHandler: auth.device }, async () => ({ machines: c().summaries.allMachines() }));
 
-	app.delete<{ Params: { id: string } }>("/v1/machines/:id", { preHandler: auth.device }, async (req) => {
+	app.delete("/v1/machines/:id", { schema: { params: IdParams }, preHandler: auth.device }, async (req) => {
 		if (!c().entities.revokeMachine(req.params.id)) throw new RelayError("not_found", "PC no encontrada");
 		return { ok: true };
 	});
 
-	app.patch<{ Params: { id: string } }>(
+	app.patch(
 		"/v1/machines/:id",
-		{ schema: { body: MachinePatch }, preHandler: auth.device },
+		{ schema: { params: IdParams, body: MachinePatch }, preHandler: auth.device },
 		async (req) => {
-			if (!c().entities.patchMachine(req.params.id, req.body as MachinePatchRow)) {
+			if (!c().entities.patchMachine(req.params.id, req.body)) {
 				throw new RelayError("not_found", "PC no encontrada");
 			}
 			const m = c().repos.machines.get(req.params.id)!;

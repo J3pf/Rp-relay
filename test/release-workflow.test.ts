@@ -13,9 +13,17 @@ import { describe, expect, it } from "vitest";
  */
 
 const workflow = readFileSync(join(process.cwd(), ".github/workflows/release.yml"), "utf8");
+const ciWorkflow = readFileSync(join(process.cwd(), ".github/workflows/ci.yml"), "utf8");
 const manifest = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+	version: string;
 	bundledDependencies?: string[];
 	dependencies?: Record<string, string>;
+};
+const protocolManifest = JSON.parse(readFileSync(join(process.cwd(), "packages/protocol/package.json"), "utf8")) as {
+	version: string;
+};
+const lockfile = JSON.parse(readFileSync(join(process.cwd(), "package-lock.json"), "utf8")) as {
+	packages?: Record<string, { dependencies?: Record<string, string> }>;
 };
 
 /** Splits the `jobs:` block into job name → body, keyed by two-space indentation. */
@@ -153,5 +161,42 @@ describe("release workflow", () => {
 		const verify = jobs().get("verify");
 		expect(verify).toBeDefined();
 		expect(verify).toMatch(/\[ -f [^\]]+\] \|\| \{[^}]*exit 1/);
+	});
+
+	it("keeps @j3pf/rp-protocol dependency in lockstep with packages/protocol and enforces it in verify", () => {
+		expect(manifest.dependencies?.["@j3pf/rp-protocol"]).toBe(protocolManifest.version);
+		expect(lockfile.packages?.[""]?.dependencies?.["@j3pf/rp-protocol"]).toBe(protocolManifest.version);
+		const verify = jobs().get("verify");
+		expect(verify).toBeDefined();
+		expect(verify).toContain("@j3pf/rp-protocol");
+	});
+
+	it("scopes workflow permissions to contents: read at top level and grants minimal per-job writes", () => {
+		const topPermissions = (yaml: string) => {
+			const match = /^permissions:\n((?: {2}\S.*\n?)+)/m.exec(yaml);
+			return match ? match[1]! : "";
+		};
+		const jobPermissions = (body: string) => {
+			const match = /^ {4}permissions:\n((?: {6}\S.*\n?)+)/m.exec(body);
+			return match ? match[1]! : "";
+		};
+
+		expect(topPermissions(ciWorkflow)).toContain("contents: read");
+		expect(topPermissions(ciWorkflow)).not.toMatch(/:\s*write/);
+
+		expect(topPermissions(workflow)).toContain("contents: read");
+		expect(topPermissions(workflow)).not.toMatch(/:\s*write/);
+
+		const all = jobs();
+		expect(jobPermissions(all.get("verify") ?? "")).toBe("");
+		expect(jobPermissions(all.get("docker") ?? "")).toContain("packages: write");
+		expect(jobPermissions(all.get("docker") ?? "")).not.toContain("contents: write");
+		expect(jobPermissions(all.get("github-release") ?? "")).toContain("contents: write");
+		expect(jobPermissions(all.get("github-release") ?? "")).not.toContain("packages: write");
+		const npm = all.get("npm");
+		if (npm !== undefined) {
+			expect(jobPermissions(npm)).toContain("id-token: write");
+			expect(jobPermissions(npm)).not.toContain("contents: write");
+		}
 	});
 });

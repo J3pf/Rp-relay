@@ -1,17 +1,18 @@
 import { readFileSync } from "node:fs";
 import { Type } from "@sinclair/typebox";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyRequest } from "fastify";
 import { bearer, safeEqual } from "../../auth/tokens.js";
 import { adminTokenPath } from "../../config.js";
 import type { Ctx } from "../../context.js";
 import { RelayError } from "../../util/errors.js";
+import type { TypeBoxFastifyInstance } from "../server.js";
 
 /**
  * API de administración para el CLI (`rp-relay revoke|push test|machines set` contra un relay en marcha).
  * Se autentica con `dataDir/admin.token` (0600) y se rechaza si la petición llega a través de un proxy
  * (cabecera `X-Forwarded-For`), de modo que no es alcanzable desde Internet aunque Caddy publique el resto.
  */
-export function registerAdmin(app: FastifyInstance, c: () => Ctx): void {
+export function registerAdmin(app: TypeBoxFastifyInstance, c: () => Ctx): void {
 	let adminToken: string | null = null;
 	const load = (force = false): string | null => {
 		if (adminToken && !force) return adminToken;
@@ -68,13 +69,13 @@ export function registerAdmin(app: FastifyInstance, c: () => Ctx): void {
 		};
 	});
 
-	app.post<{ Body: { deviceId?: string } }>(
+	app.post(
 		"/admin/push-test",
 		{ schema: { body: Type.Object({ deviceId: Type.Optional(Type.String()) }) }, preHandler: guard },
 		async (req) => ({ results: await c().dispatcher.test(req.body.deviceId) }),
 	);
 
-	app.post<{ Body: { kind: "device" | "machine"; id: string } }>(
+	app.post(
 		"/admin/revoke",
 		{
 			schema: {
@@ -90,10 +91,11 @@ export function registerAdmin(app: FastifyInstance, c: () => Ctx): void {
 		},
 	);
 
-	app.post<{ Params: { id: string }; Body: { name?: string; context?: string; color?: string } }>(
+	app.post(
 		"/admin/machines/:id",
 		{
 			schema: {
+				params: Type.Object({ id: Type.String() }),
 				body: Type.Object({
 					name: Type.Optional(Type.String()),
 					context: Type.Optional(Type.String()),

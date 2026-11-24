@@ -5,9 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
+  contents: read
 
 jobs:
   verify:
@@ -26,6 +24,9 @@ jobs:
             v=$(node -p "require('./$p').version")
             [ "$v" = "$tag" ] || { echo "$p tiene versión $v, la etiqueta es $tag"; exit 1; }
           done
+          dep=$(node -p "require('./package.json').dependencies['@j3pf/rp-protocol']")
+          proto=$(node -p "require('./packages/protocol/package.json').version")
+          [ "$dep" = "$proto" ] || { echo "package.json depende de @j3pf/rp-protocol@$dep, pero packages/protocol está en $proto"; exit 1; }
       # Las notas curadas son la cara del release; sin ellas la página muestra ruido de commits.
       # Se valida aquí y no en `github-release` para que un tag sin notas no publique ni la imagen.
       - name: Las notas curadas del release existen
@@ -44,6 +45,9 @@ jobs:
     if: ${{ vars.RP_PUBLISH_NPM == 'true' }}
     needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,6 +68,9 @@ jobs:
   docker:
     needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -96,6 +103,8 @@ jobs:
     # deploy/install.sh (`npm install -g <tgz>`). No espera al job de npm.
     needs: docker
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

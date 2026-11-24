@@ -7,13 +7,13 @@ import {
 	type MeshSnapshot,
 } from "@j3pf/rp-protocol";
 import { Type } from "@sinclair/typebox";
-import type { FastifyInstance } from "fastify";
 import type { Ctx } from "../../context.js";
 import type { CommRow } from "../../db/repos/comms.js";
 import { buildCommView } from "../../domain/mesh/service.js";
 import { deduplicateCommRows } from "../../domain/mesh/topology.js";
 import { RelayError } from "../../util/errors.js";
 import type { HttpAuth } from "../auth.js";
+import type { TypeBoxFastifyInstance } from "../server.js";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;
@@ -40,14 +40,14 @@ function toCommViews(comms: CommRow[], c: () => Ctx): CommView[] {
 	);
 }
 
-export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth): void {
-	app.get<{ Querystring: MeshQuery }>(
+export function registerMesh(app: TypeBoxFastifyInstance, c: () => Ctx, auth: HttpAuth): void {
+	app.get(
 		"/v1/mesh",
 		{ schema: { querystring: MeshQuery }, preHandler: auth.device },
 		async (req): Promise<MeshSnapshot> => c().mesh.getSnapshot(req.query.machineId ?? null),
 	);
 
-	app.get<{ Querystring: MeshConversationQuery }>(
+	app.get(
 		"/v1/mesh/conversation",
 		{ schema: { querystring: MeshConversationQuery }, preHandler: auth.device },
 		async (req): Promise<MeshConversationRes> => {
@@ -73,10 +73,7 @@ export function registerMesh(app: FastifyInstance, c: () => Ctx, auth: HttpAuth)
 		},
 	);
 
-	app.get<{
-		Params: { agentId: string };
-		Querystring: AgentCommsQuery;
-	}>(
+	app.get(
 		"/v1/mesh/agents/:agentId/comms",
 		{
 			schema: {
