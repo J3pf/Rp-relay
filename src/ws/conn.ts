@@ -14,7 +14,7 @@ export interface Conn {
 	send(env: Envelope): boolean;
 	close(code: number, reason?: string): void;
 	readonly bufferedAmount: number;
-	readonly closed?: boolean | { code: number; reason: string } | null;
+	readonly closed?: boolean;
 }
 
 export interface AgentConn extends Conn {
@@ -42,8 +42,11 @@ export interface HostConn extends Conn {
 	ready: boolean;
 }
 
+const SLOW_CONSUMER_TERMINATE_MS = 500;
+
 export class WsConn implements Conn {
 	closed = false;
+	private terminateTimer: NodeJS.Timeout | undefined;
 	constructor(
 		readonly socket: WebSocket,
 		private readonly hardBufferedBytes = Number.POSITIVE_INFINITY,
@@ -67,11 +70,30 @@ export class WsConn implements Conn {
 	close(code: number, reason?: string): void {
 		this.closed = true;
 		try {
-			if (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
+			if (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING) {
+				const stalled = code === CloseCode.TryAgainLater && this.socket.bufferedAmount > this.hardBufferedBytes;
 				this.socket.close(code, reason?.slice(0, 120));
+				if (stalled) this.scheduleTerminate();
+			}
 		} catch {
 			this.socket.terminate();
 		}
+	}
+	private scheduleTerminate(): void {
+		if (this.terminateTimer || this.socket.readyState === WebSocket.CLOSED) return;
+		const clear = () => {
+			if (this.terminateTimer) {
+				clearTimeout(this.terminateTimer);
+				this.terminateTimer = undefined;
+			}
+		};
+		this.socket.once("close", clear);
+		this.terminateTimer = setTimeout(() => {
+			this.terminateTimer = undefined;
+			this.socket.off("close", clear);
+			if (this.socket.readyState !== WebSocket.CLOSED) this.socket.terminate();
+		}, SLOW_CONSUMER_TERMINATE_MS);
+		this.terminateTimer.unref();
 	}
 }
 

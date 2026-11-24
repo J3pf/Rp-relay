@@ -1,4 +1,4 @@
-import { AgentSendReq } from "@j3pf/rp-protocol";
+import { AgentSendReq, CloseCode } from "@j3pf/rp-protocol";
 import { Type } from "@sinclair/typebox";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Ctx } from "../../context.js";
@@ -34,13 +34,21 @@ export function registerAgentTransport(
 			throw new RelayError("not_found", "no hay sesión long-poll: envía agent.hello por /v1/agent/send");
 		}
 		if (p.instance && entry.conn.instance !== p.instance) {
-			return reply.code(410).send({ error: { code: "conflict", message: "sesión reemplazada" }, closeCode: 4003 });
+			return reply
+				.code(410)
+				.send({ error: { code: "conflict", message: "sesión reemplazada" }, closeCode: CloseCode.Replaced });
 		}
 		const ac = new AbortController();
-		req.raw.on("close", () => {
-			if (!reply.sent && req.raw.destroyed) ac.abort();
-		});
-		const r = await entry.conn.poll(p.timeout ?? POLL_MS, ac.signal);
+		const onClose = () => {
+			if (!reply.raw.writableEnded) ac.abort();
+		};
+		reply.raw.on("close", onClose);
+		let r: Awaited<ReturnType<typeof entry.conn.poll>>;
+		try {
+			r = await entry.conn.poll(p.timeout ?? POLL_MS, ac.signal);
+		} finally {
+			reply.raw.off("close", onClose);
+		}
 		if ("closed" in r) {
 			registry.drop(p.agentId, entry);
 			return reply

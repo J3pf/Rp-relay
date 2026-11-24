@@ -11,7 +11,7 @@ export class LongPollConn implements AgentConn {
 	lastTouchAt = 0;
 	lastActivity = Date.now();
 	lastPollAt = Date.now();
-	closed: { code: number; reason: string } | null = null;
+	closeInfo: { code: number; reason: string } | null = null;
 	private queue: Envelope[] = [];
 	private bytes = 0;
 	private waiter: (() => void) | null = null;
@@ -20,6 +20,10 @@ export class LongPollConn implements AgentConn {
 		readonly machineId: string,
 		private readonly hardBufferedBytes = Number.POSITIVE_INFINITY,
 	) {}
+
+	get closed(): boolean {
+		return this.closeInfo !== null;
+	}
 
 	send(env: Envelope): boolean {
 		if (this.closed) return false;
@@ -36,8 +40,8 @@ export class LongPollConn implements AgentConn {
 		return true;
 	}
 	close(code: number, reason = ""): void {
-		if (this.closed) return;
-		this.closed = { code, reason };
+		if (this.closeInfo) return;
+		this.closeInfo = { code, reason };
 		this.wake();
 	}
 	get bufferedAmount(): number {
@@ -72,6 +76,7 @@ export class LongPollConn implements AgentConn {
 					resolve();
 				};
 				timer = setTimeout(done, timeoutMs);
+				timer.unref();
 				this.waiter = done;
 				signal?.addEventListener("abort", done, { once: true });
 			});
@@ -86,7 +91,7 @@ export class LongPollConn implements AgentConn {
 			this.bytes = 0;
 			return { messages };
 		}
-		if (this.closed) return { closed: this.closed };
+		if (this.closeInfo) return { closed: this.closeInfo };
 		return { messages: [] };
 	}
 }

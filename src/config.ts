@@ -5,6 +5,7 @@ import { Value } from "@sinclair/typebox/value";
 
 const Limits = Type.Object({
 	blobMaxBytes: Type.Integer({ minimum: 1024, default: 26_214_400 }),
+	blobTotalMaxBytes: Type.Integer({ minimum: 1024, default: 1_073_741_824 }),
 	blobTtlDays: Type.Number({ minimum: 0.001, default: 7 }),
 	eventRetentionDays: Type.Number({ minimum: 0.001, default: 7 }),
 	eventsPerAgent: Type.Integer({ minimum: 10, default: 5000 }),
@@ -17,7 +18,11 @@ const Limits = Type.Object({
 	hostRequestTimeoutMs: Type.Integer({ minimum: 50, default: 15_000 }),
 	helloTimeoutMs: Type.Integer({ minimum: 50, default: 10_000 }),
 	pairAttemptsPerMinute: Type.Integer({ minimum: 1, default: 5 }),
+	maxWsPerDevice: Type.Integer({ minimum: 1, default: 32 }),
+	maxWsTotal: Type.Integer({ minimum: 1, default: 1024 }),
 });
+
+const TrustProxySchema = Type.Union([Type.Boolean(), Type.Integer({ minimum: 0 }), Type.String({ minLength: 1 })]);
 
 export const ConfigSchema = Type.Object({
 	listen: Type.Object({
@@ -29,7 +34,7 @@ export const ConfigSchema = Type.Object({
 	dataDir: Type.String({ default: "/var/lib/rp-relay" }),
 	relayName: Type.String({ default: "rp-relay" }),
 	logLevel: Type.String({ default: "info" }),
-	trustProxy: Type.Optional(Type.Boolean()),
+	trustProxy: Type.Optional(TrustProxySchema),
 	fcm: Type.Optional(Type.Object({ serviceAccountFile: Type.String() })),
 	apns: Type.Optional(
 		Type.Object({
@@ -65,6 +70,21 @@ export function configPath(): string {
 
 type Json = Record<string, any>;
 
+function parseTrustProxy(raw: string): boolean | number | string {
+	const trimmed = raw.trim();
+	const lower = trimmed.toLowerCase();
+	if (lower === "true") return true;
+	if (lower === "false" || trimmed === "0") return false;
+	if (/^[1-9]\d*$/.test(trimmed)) return Number(trimmed);
+	return trimmed;
+}
+
+export function effectiveTrustProxy(config: Pick<Config, "listen" | "trustProxy">): boolean | number | string {
+	if (config.trustProxy !== undefined) return config.trustProxy;
+	const isLocalHost = ["127.0.0.1", "::1", "localhost"].includes(config.listen.host);
+	return isLocalHost ? "127.0.0.1, ::1" : false;
+}
+
 function applyEnv(raw: Json, env: NodeJS.ProcessEnv): Json {
 	const c: Json = structuredClone(raw);
 	c.listen ??= {};
@@ -76,7 +96,7 @@ function applyEnv(raw: Json, env: NodeJS.ProcessEnv): Json {
 	if (env.RP_RELAY_NAME) c.relayName = env.RP_RELAY_NAME;
 	if (env.LOG_LEVEL) c.logLevel = env.LOG_LEVEL;
 	else if (env.RP_LOG_LEVEL) c.logLevel = env.RP_LOG_LEVEL;
-	if (env.RP_TRUST_PROXY) c.trustProxy = env.RP_TRUST_PROXY === "true" || env.RP_TRUST_PROXY === "1";
+	if (env.RP_TRUST_PROXY?.trim()) c.trustProxy = parseTrustProxy(env.RP_TRUST_PROXY);
 	if (env.RP_FCM_SERVICE_ACCOUNT_FILE) c.fcm = { serviceAccountFile: env.RP_FCM_SERVICE_ACCOUNT_FILE };
 	const apns = { ...(c.apns ?? {}) };
 	if (env.RP_APNS_KEY_ID) apns.keyId = env.RP_APNS_KEY_ID;
@@ -114,8 +134,6 @@ export function loadConfig(path: string = configPath(), env: NodeJS.ProcessEnv =
 		} catch (e) {
 			throw new Error(`no se pudo leer ${path}: ${(e as Error).message}`);
 		}
-	} else if (!env.RP_DATA_DIR && !env.RP_PUBLIC_URL) {
-		// sin archivo ni variables: se ejecuta con valores por defecto (útil en Docker con RP_*)
 	}
 	return parseConfig(raw, env);
 }

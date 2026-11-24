@@ -3,8 +3,9 @@ import rateLimit from "@fastify/rate-limit";
 import type { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import Fastify, { type FastifyInstance, LogController } from "fastify";
 import type { Logger } from "pino";
+import { bearer, tokenKind } from "../auth/tokens.js";
 import { registerBlobRoutes } from "../blobs/routes.js";
-import type { Config } from "../config.js";
+import { type Config, effectiveTrustProxy } from "../config.js";
 import type { Ctx } from "../context.js";
 import { httpStatus, RelayError } from "../util/errors.js";
 import type { LongPollRegistry } from "../ws/agentGateway.js";
@@ -27,13 +28,18 @@ export interface BuildHttpOptions {
 
 export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 	const { config, log, c } = o;
-	const isLocalHost = ["127.0.0.1", "::1", "localhost"].includes(config.listen.host);
-	const trustProxy = config.trustProxy !== undefined ? config.trustProxy : isLocalHost ? "127.0.0.1, ::1" : false;
+	const trustProxy = effectiveTrustProxy(config);
 	const behindProxy = Boolean(trustProxy);
+	const fastifyTrustProxy =
+		typeof trustProxy === "number"
+			? trustProxy > 0
+				? (_address: string, hop: number) => hop < trustProxy
+				: false
+			: trustProxy;
 	// SAFETY: withTypeProvider() changes only the compile-time provider type; the returned value remains the Fastify instance passed to route registrars.
 	const app = Fastify({
 		loggerInstance: log,
-		trustProxy,
+		trustProxy: fastifyTrustProxy,
 		bodyLimit: 2 * 1024 * 1024,
 		logController: new LogController({ disableRequestLogging: true }),
 		...(o.https ? { https: o.https } : {}),
@@ -44,14 +50,13 @@ export async function buildHttp(o: BuildHttpOptions): Promise<FastifyInstance> {
 		max: 600,
 		timeWindow: "1 minute",
 		keyGenerator: (req) => {
-			const auth = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
-			const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+			const kind = tokenKind(bearer(req.headers.authorization));
 			// Token verificado con formato estándar (rpd_/rpm_); si no es válido, agrupar por IP
-			if (token.startsWith("rpd_")) {
+			if (kind === "device") {
 				const d = c().auth.device(req.headers);
 				req._rpDevice = d;
 				if (d.ok) return `dev:${d.row.id}`;
-			} else if (token.startsWith("rpm_")) {
+			} else if (kind === "machine") {
 				const m = c().auth.machine(req.headers);
 				req._rpMachine = m;
 				if (m.ok) return `mac:${m.row.id}`;

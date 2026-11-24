@@ -13,7 +13,7 @@ services:
       RP_PUBLIC_URL: https://${RP_DOMAIN:?define RP_DOMAIN en .env}
       RP_RELAY_NAME: ${RP_RELAY_NAME:-Servidor casa}
       RP_LISTEN_HOST: 0.0.0.0
-      RP_TRUST_PROXY: "true"          # detrás de Caddy: IP real del cliente para los límites de tasa
+      RP_TRUST_PROXY: "1"             # detrás de Caddy (1 salto de proxy): IP real del cliente para los límites de tasa
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # FCM es opcional. Para activarlo: monta la cuenta de servicio y descomenta
       # RP_FCM_SERVICE_ACCOUNT_FILE: /etc/rp-relay/firebase-sa.json

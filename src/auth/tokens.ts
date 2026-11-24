@@ -6,6 +6,13 @@ const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export type TokenKind = "device" | "machine";
 const PREFIX: Record<TokenKind, string> = { device: "rpd", machine: "rpm" };
 
+export function tokenKind(token: string | undefined): TokenKind | undefined {
+	if (!token) return undefined;
+	if (token.startsWith(`${PREFIX.device}_`)) return "device";
+	if (token.startsWith(`${PREFIX.machine}_`)) return "machine";
+	return undefined;
+}
+
 /** Token de 256 bits; sólo se guarda su SHA-256. */
 export function newToken(kind: TokenKind): string {
 	return `${PREFIX[kind]}_${randomBytes(32).toString("base64url")}`;
