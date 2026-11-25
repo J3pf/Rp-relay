@@ -8,6 +8,7 @@ import {
 	envelope,
 	isDroppableEvent,
 	isPersistedEvent,
+	truncatePreview,
 } from "@j3pf/rp-protocol";
 import { Value } from "@sinclair/typebox/value";
 import type { Ctx } from "../context.js";
@@ -19,6 +20,21 @@ import type { AgentConn } from "../ws/conn.js";
 import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolution.js";
 
 const UNRESOLVED_COMM_LIMIT = 500;
+const ACTIVITY_TOUCH_THROTTLE_MS = 15_000;
+const ACTIVITY_EVENT_TYPES = new Set([
+	"message_start",
+	"message_delta",
+	"message_end",
+	"user_message",
+	"tool_execution_start",
+	"tool_execution_end",
+	"agent_start",
+	"comm",
+]);
+const INTERCOM_COMM_ACTIONS = new Set(["send", "ask", "reply", "handover"]);
+
+type EventPayload = { type: string; [k: string]: unknown };
+type EventProjectionOutcome = { agentChanged: boolean; storedComm?: CommRow };
 
 function paneBinding(row: AgentRow): string | null {
 	if (!row.herdr) return null;
@@ -45,7 +61,7 @@ export function previewOf(e: any): string | null {
 				: "";
 	const flat = text.replace(/\s+/g, " ").trim();
 	if (!flat) return null;
-	return flat.length > 140 ? `${flat.slice(0, 139)}…` : flat;
+	return truncatePreview(flat);
 }
 
 const modelOf = (m: any): string | null => {
@@ -218,136 +234,116 @@ export class AgentService {
 		conn.lastSeq = 0;
 	}
 
-	onEvent(conn: AgentConn, ev: AgentEvent): void {
-		const { repos, hub, dispatcher, publisher } = this.c();
-		const agentId = conn.agentId;
-		if (!agentId || hub.agents.get(agentId) !== conn) return;
-		if (ev.epoch !== conn.epoch) this.switchEpoch(conn, ev.epoch);
-		if (ev.seq <= conn.lastSeq) return; // reenvío (al menos una vez): ya visto
-		const e = ev.e as { type: string; [k: string]: unknown };
-		const now = Date.now();
+	private resolveCommPeer(agentId: string, machineId: string, comm: CommEvent, allAgents: AgentRow[]): string | null {
+		let peerAgentId = resolvePeerAgentId(agentId, machineId, comm.peer, allAgents);
+		if (!peerAgentId && comm.replyTo) {
+			peerAgentId = resolvePeerAgentIdFromReply(agentId, this.c().repos.comms.findByMessageId(comm.replyTo), allAgents);
+		}
+		return peerAgentId;
+	}
+
+	private persistCommEvent(conn: AgentConn, agentId: string, seq: number, e: EventPayload): CommRow | undefined {
+		const { repos, log } = this.c();
+		if (!Value.Check(CommEvent, e)) {
+			log.warn({ agentId, seq }, "invalid comm event payload; skipping comm persistence");
+			return undefined;
+		}
+		const comm = e;
+		const validAction =
+			comm.channel === "orchestrator" ? comm.action === "message" : INTERCOM_COMM_ACTIONS.has(comm.action);
+		if (!validAction) {
+			log.warn(
+				{ agentId, commId: comm.commId, channel: comm.channel, action: comm.action },
+				"invalid comm channel/action combination; skipping comm persistence",
+			);
+			return undefined;
+		}
+		const allAgents = repos.agents.list();
+		const peerAgentId = this.resolveCommPeer(agentId, conn.machineId, comm, allAgents);
+		const emitterAgent = allAgents.find((a) => a.id === agentId) ?? repos.agents.get(agentId);
+		const peerAgent = peerAgentId
+			? (allAgents.find((a) => a.id === peerAgentId) ?? repos.agents.get(peerAgentId))
+			: undefined;
+		const shouldRedact = emitterAgent?.redacted === 1 || peerAgent?.redacted === 1;
+		return repos.comms.upsert({
+			agent_id: agentId,
+			comm_id: comm.commId,
+			machine_id: conn.machineId,
+			direction: comm.direction,
+			channel: comm.channel,
+			action: comm.action,
+			peer_session_id: comm.peer.sessionId,
+			peer_name: comm.peer.name,
+			peer_cwd: comm.peer.cwd,
+			peer_ref: comm.peer.ref,
+			peer_agent_id: peerAgentId,
+			message_id: comm.messageId,
+			reply_to: comm.replyTo,
+			expects_reply: comm.expectsReply,
+			text: shouldRedact ? null : comm.text,
+			truncated: comm.truncated,
+			delivered: comm.delivered ?? null,
+			at: comm.at,
+		});
+	}
+
+	private applyEventProjection(conn: AgentConn, agentId: string, seq: number, e: EventPayload): EventProjectionOutcome {
+		const { repos } = this.c();
 		let agentChanged = false;
 		let storedComm: CommRow | undefined;
-		const persisted = isPersistedEvent(e.type);
-		const isActivityEvent = [
-			"message_start",
-			"message_delta",
-			"message_end",
-			"user_message",
-			"tool_execution_start",
-			"tool_execution_end",
-			"agent_start",
-			"comm",
-		].includes(e.type);
-		const shouldTouch = isActivityEvent && now - (conn.lastTouchAt ?? 0) >= 15_000;
-
-		let inserted = true;
-		const applyDbWrites = () => {
-			if (persisted) {
-				inserted = repos.events.insert(agentId, ev.epoch, ev.seq, now, e.type, e);
-				repos.agents.setSeq(agentId, ev.seq);
-				if (!inserted) return;
+		switch (e.type) {
+			case "comm":
+				storedComm = this.persistCommEvent(conn, agentId, seq, e);
+				break;
+			case "message_end": {
+				const pv = previewOf(e);
+				if (pv && repos.agents.get(agentId)?.redacted !== 1) {
+					repos.agents.setPreview(agentId, pv);
+					agentChanged = true;
+				}
+				break;
 			}
-			switch (e.type) {
-				case "comm": {
-					if (!Value.Check(CommEvent, e)) {
-						this.c().log.warn({ agentId, seq: ev.seq }, "invalid comm event payload; skipping comm persistence");
-						break;
-					}
-					const comm = e;
-					const validAction =
-						comm.channel === "orchestrator"
-							? comm.action === "message"
-							: ["send", "ask", "reply", "handover"].includes(comm.action);
-					if (!validAction) {
-						this.c().log.warn(
-							{ agentId, commId: comm.commId, channel: comm.channel, action: comm.action },
-							"invalid comm channel/action combination; skipping comm persistence",
-						);
-						break;
-					}
-					const allAgents = repos.agents.list();
-					let peerAgentId = resolvePeerAgentId(agentId, conn.machineId, comm.peer, allAgents);
-					if (!peerAgentId && comm.replyTo) {
-						peerAgentId = resolvePeerAgentIdFromReply(agentId, repos.comms.findByMessageId(comm.replyTo), allAgents);
-					}
-					const emitterAgent = allAgents.find((a) => a.id === agentId) ?? repos.agents.get(agentId);
-					const peerAgent = peerAgentId
-						? (allAgents.find((a) => a.id === peerAgentId) ?? repos.agents.get(peerAgentId))
-						: undefined;
-					const shouldRedact = emitterAgent?.redacted === 1 || peerAgent?.redacted === 1;
-					storedComm = repos.comms.upsert({
-						agent_id: agentId,
-						comm_id: comm.commId,
-						machine_id: conn.machineId,
-						direction: comm.direction,
-						channel: comm.channel,
-						action: comm.action,
-						peer_session_id: comm.peer.sessionId,
-						peer_name: comm.peer.name,
-						peer_cwd: comm.peer.cwd,
-						peer_ref: comm.peer.ref,
-						peer_agent_id: peerAgentId,
-						message_id: comm.messageId,
-						reply_to: comm.replyTo,
-						expects_reply: comm.expectsReply,
-						text: shouldRedact ? null : comm.text,
-						truncated: comm.truncated,
-						delivered: comm.delivered ?? null,
-						at: comm.at,
-					});
-					break;
+			case "session_info_changed": {
+				const name = (e.name ?? e.sessionName) as string | undefined;
+				if (typeof name === "string") {
+					repos.agents.setSession(agentId, name);
+					this.resolveUnresolvedComms(repos.agents.get(agentId));
+					agentChanged = true;
 				}
-				case "message_end": {
-					const pv = previewOf(e);
-					if (pv && repos.agents.get(agentId)?.redacted !== 1) {
-						repos.agents.setPreview(agentId, pv);
-						agentChanged = true;
-					}
-					break;
-				}
-				case "session_info_changed": {
-					const name = (e.name ?? e.sessionName) as string | undefined;
-					if (typeof name === "string") {
-						repos.agents.setSession(agentId, name);
-						this.resolveUnresolvedComms(repos.agents.get(agentId));
-						agentChanged = true;
-					}
-					break;
-				}
-				case "model_select": {
-					const m = modelOf(e.model);
-					if (m) {
-						repos.agents.setModel(agentId, m);
-						agentChanged = true;
-					}
-					break;
-				}
-				case "thinking_level_select": {
-					const lvl = (e.level ?? e.thinking) as string | undefined;
-					if (typeof lvl === "string") {
-						repos.agents.setThinking(agentId, lvl);
-						agentChanged = true;
-					}
-					break;
-				}
+				break;
 			}
-			if (shouldTouch) {
-				conn.lastTouchAt = now;
-				repos.agents.touch(agentId, now);
+			case "model_select": {
+				const m = modelOf(e.model);
+				if (m) {
+					repos.agents.setModel(agentId, m);
+					agentChanged = true;
+				}
+				break;
 			}
-		};
+			case "thinking_level_select": {
+				const lvl = (e.level ?? e.thinking) as string | undefined;
+				if (typeof lvl === "string") {
+					repos.agents.setThinking(agentId, lvl);
+					agentChanged = true;
+				}
+				break;
+			}
+		}
+		return { agentChanged, storedComm };
+	}
 
-		if (persisted) repos.db.transaction(applyDbWrites)();
-		else applyDbWrites();
-		conn.lastSeq = ev.seq;
-		if (!inserted) return;
-
-		if (storedComm) {
-			this.c().mesh.invalidate();
-			this.c().mesh.onComm(storedComm);
-		} else if (agentChanged || e.type === "todo_update" || e.type === "subagent_update") {
-			this.c().mesh.invalidate();
+	private dispatchEventSideEffects(
+		agentId: string,
+		ev: AgentEvent,
+		e: EventPayload,
+		outcome: EventProjectionOutcome,
+	): void {
+		const { repos, hub, dispatcher, publisher, mesh } = this.c();
+		if (outcome.storedComm) {
+			mesh.invalidate();
+			mesh.onComm(outcome.storedComm);
+		} else if (outcome.agentChanged || e.type === "todo_update" || e.type === "subagent_update") {
+			mesh.invalidate();
 		}
 
 		if (e.type === "agent_settled") {
@@ -364,9 +360,43 @@ export class AgentService {
 		}
 
 		const out = envelope("agent.event", { agentId, epoch: ev.epoch, seq: ev.seq, e });
-		const droppable = isDroppableEvent(e.type) || e.type === "tool_execution_update";
+		const droppable = isDroppableEvent(e.type);
 		for (const app of hub.subscribers(agentId)) hub.sendApp(app, out, droppable);
-		if (agentChanged) publisher.agent(agentId);
+		if (outcome.agentChanged) publisher.agent(agentId);
+	}
+
+	onEvent(conn: AgentConn, ev: AgentEvent): void {
+		const { repos, hub } = this.c();
+		const agentId = conn.agentId;
+		if (!agentId || hub.agents.get(agentId) !== conn) return;
+		if (ev.epoch !== conn.epoch) this.switchEpoch(conn, ev.epoch);
+		if (ev.seq <= conn.lastSeq) return; // reenvío (al menos una vez): ya visto
+		const e = ev.e as EventPayload;
+		const now = Date.now();
+		const persisted = isPersistedEvent(e.type);
+		const shouldTouch = ACTIVITY_EVENT_TYPES.has(e.type) && now - (conn.lastTouchAt ?? 0) >= ACTIVITY_TOUCH_THROTTLE_MS;
+
+		let inserted = true;
+		let outcome: EventProjectionOutcome = { agentChanged: false };
+		const applyDbWrites = () => {
+			if (persisted) {
+				inserted = repos.events.insert(agentId, ev.epoch, ev.seq, now, e.type, e);
+				repos.agents.setSeq(agentId, ev.seq);
+				if (!inserted) return;
+			}
+			outcome = this.applyEventProjection(conn, agentId, ev.seq, e);
+			if (shouldTouch) {
+				conn.lastTouchAt = now;
+				repos.agents.touch(agentId, now);
+			}
+		};
+
+		if (persisted) repos.db.transaction(applyDbWrites)();
+		else applyDbWrites();
+		conn.lastSeq = ev.seq;
+		if (!inserted) return;
+
+		this.dispatchEventSideEffects(agentId, ev, e, outcome);
 	}
 
 	onStatus(conn: AgentConn, d: { status: string; detail?: string | null }): void {

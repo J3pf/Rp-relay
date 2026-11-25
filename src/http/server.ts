@@ -15,6 +15,7 @@ import { registerBlobRoutes } from "../blobs/routes.js";
 import { type Config, effectiveTrustProxy } from "../config.js";
 import type { Ctx } from "../context.js";
 import { httpStatus, RelayError } from "../util/errors.js";
+import { isLoopbackAddress } from "../util/loopback.js";
 import type { LongPollRegistry } from "../ws/agentGateway.js";
 import { makeHttpAuth } from "./auth.js";
 import { registerAdmin } from "./routes/admin.js";
@@ -79,8 +80,7 @@ export async function buildHttp(o: BuildHttpOptions): Promise<TypeBoxFastifyInst
 		},
 		allowList: (req) => {
 			if (req.url !== "/healthz") return false;
-			const remote = req.raw.socket?.remoteAddress;
-			return remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+			return isLoopbackAddress(req.raw.socket?.remoteAddress);
 		},
 	});
 	await app.register(multipart, { limits: { fileSize: config.limits.blobMaxBytes + 1, files: 1, fields: 5 } });

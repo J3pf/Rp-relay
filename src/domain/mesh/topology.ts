@@ -1,12 +1,20 @@
 import { posix } from "node:path";
-import type { MeshGroup, MeshNode, MeshSnapshot, SubagentUpdateEvent, TodoTask } from "@j3pf/rp-protocol";
+import {
+	type MeshEdge,
+	type MeshGroup,
+	type MeshNode,
+	type MeshSnapshot,
+	type SubagentUpdateEvent,
+	type TodoTask,
+	truncatePreview,
+} from "@j3pf/rp-protocol";
 import type { AgentRow } from "../../db/repos/agents.js";
 import type { CommRow } from "../../db/repos/comms.js";
 import type { MachineRow } from "../../db/repos/machines.js";
+import { DAY } from "../../util/time.js";
 import { agentDisplayName, disambiguateAgentNames, groupDisplayLabel } from "../agentNames.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const ACTIVE_MS = 20_000;
+export const MESH_EDGE_ACTIVE_MS = 20_000;
 const INITIATION_ACTIONS = new Set(["send", "ask", "handover", "message"]);
 
 type TopologyMessage = {
@@ -31,16 +39,17 @@ export interface BuildTopologyOptions {
 	machines: MachineRow[];
 	comms: CommRow[];
 	now?: number;
+	onlineAgentIds?: ReadonlySet<string>;
 	openPromptsByAgent?: Record<string, number>;
 	latestTodosByAgent?: Record<string, TodoTask[]>;
 	latestSubagentsByAgent?: Record<string, SubagentUpdateEvent[]>;
 	machineFilter?: string | null;
 }
 
-function endpoints(comm: CommRow): { from: string; to: string } | null {
-	const peerId = comm.peer_agent_id;
-	if (!peerId) return null;
-	return comm.direction === "out" ? { from: comm.agent_id, to: peerId } : { from: peerId, to: comm.agent_id };
+export function commEndpoints(comm: CommRow): { from: string | null; to: string | null } {
+	return comm.direction === "out"
+		? { from: comm.agent_id, to: comm.peer_agent_id }
+		: { from: comm.peer_agent_id, to: comm.agent_id };
 }
 
 function compareRows(a: CommRow, b: CommRow): number {
@@ -88,8 +97,8 @@ export function deduplicateCommRows(comms: CommRow[]): CommRow[] {
 function deduplicateMessages(comms: CommRow[], agentIds: Set<string>): TopologyMessage[] {
 	const messages: TopologyMessage[] = [];
 	for (const row of deduplicateCommRows(comms)) {
-		const ep = endpoints(row);
-		if (!ep) continue;
+		const ep = commEndpoints(row);
+		if (!ep.from || !ep.to) continue;
 		messages.push({
 			fromAgentId: ep.from,
 			toAgentId: ep.to,
@@ -132,13 +141,7 @@ function formatEdgeId(a: string, b: string): string {
 	return `${escapePart(a)}|${escapePart(b)}`;
 }
 
-function connectedComponents(edges: Map<string, InternalEdge>): string[][] {
-	const neighbors = new Map<string, Set<string>>();
-	for (const { a, b } of edges.values()) {
-		if (!a || !b) continue;
-		(neighbors.get(a) ?? neighbors.set(a, new Set()).get(a)!).add(b);
-		(neighbors.get(b) ?? neighbors.set(b, new Set()).get(b)!).add(a);
-	}
+function connectedComponents(neighbors: Map<string, Set<string>>): string[][] {
 	const components: string[][] = [];
 	const visited = new Set<string>();
 	for (const start of [...neighbors.keys()].sort()) {
@@ -158,6 +161,16 @@ function connectedComponents(edges: Map<string, InternalEdge>): string[][] {
 		components.push(component.sort());
 	}
 	return components;
+}
+
+function edgeNeighbors(edges: Map<string, InternalEdge>): Map<string, Set<string>> {
+	const neighbors = new Map<string, Set<string>>();
+	for (const { a, b } of edges.values()) {
+		if (!a || !b) continue;
+		(neighbors.get(a) ?? neighbors.set(a, new Set()).get(a)!).add(b);
+		(neighbors.get(b) ?? neighbors.set(b, new Set()).get(b)!).add(a);
+	}
+	return neighbors;
 }
 
 function cwdDepth(cwd: string): number {
@@ -365,21 +378,7 @@ function cwdGroups(members: AgentRow[]): {
 	const parents = new Map<string, string | null>();
 	const roles = new Map<string, MeshNode["role"]>();
 	const byId = new Map(eligible.map((agent) => [agent.id, agent]));
-	const visited = new Set<string>();
-	for (const start of [...neighbors.keys()].sort()) {
-		if (visited.has(start)) continue;
-		const ids: string[] = [];
-		const queue = [start];
-		visited.add(start);
-		while (queue.length) {
-			const current = queue.pop()!;
-			ids.push(current);
-			for (const next of neighbors.get(current) ?? []) {
-				if (visited.has(next)) continue;
-				visited.add(next);
-				queue.push(next);
-			}
-		}
+	for (const ids of connectedComponents(neighbors)) {
 		const component = ids.map((id) => byId.get(id)!).sort((a, b) => a.id.localeCompare(b.id));
 		if (component.length < 2) continue;
 		const roots = component
@@ -426,6 +425,94 @@ function cwdGroups(members: AgentRow[]): {
 	return { groups, parents, roles };
 }
 
+function buildMeshEdges(
+	edgesById: Map<string, InternalEdge>,
+	agentsById: Map<string, AgentRow>,
+	now: number,
+): MeshEdge[] {
+	return [...edgesById.values()]
+		.map((edge) => {
+			const { a, b } = edge;
+			const orderedMessages = edge.messages;
+			const latest = orderedMessages[orderedMessages.length - 1]!;
+			const replies = new Set<string>();
+			const asks: TopologyMessage[] = [];
+			let aToB = 0;
+			let bToA = 0;
+			for (const message of orderedMessages) {
+				if (message.fromAgentId === a && message.toAgentId === b) aToB++;
+				else if (message.fromAgentId === b && message.toAgentId === a) bToA++;
+				if (message.action === "reply" && message.replyTo !== null) {
+					replies.add(message.replyTo);
+				} else if (message.action === "ask") {
+					asks.push(message);
+				}
+			}
+			const latestSender = agentsById.get(latest.fromAgentId);
+			const latestReceiver = agentsById.get(latest.toAgentId);
+			const latestPreview =
+				latestSender?.redacted || latestReceiver?.redacted
+					? null
+					: latest.text === null
+						? null
+						: truncatePreview(latest.text);
+			return {
+				edgeId: formatEdgeId(a, b),
+				a,
+				b,
+				count: orderedMessages.length,
+				aToB,
+				bToA,
+				lastAt: latest.at,
+				lastFrom: latest.fromAgentId,
+				lastAction: latest.action,
+				lastPreview: latestPreview,
+				pendingAsk: asks.some((message) => !message.messageId || !replies.has(message.messageId)),
+				active: now - latest.at <= MESH_EDGE_ACTIVE_MS,
+			};
+		})
+		.sort((x, y) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
+}
+
+function buildMeshNodes(opts: {
+	agents: AgentRow[];
+	machinesById: Map<string, MachineRow>;
+	disambiguatedNames: Map<string, string>;
+	roleByAgent: Map<string, MeshNode["role"]>;
+	parentByAgent: Map<string, string | null>;
+	groupIdByAgent: Map<string, string>;
+	lastCommAtByAgent: Map<string, number>;
+	onlineAgentIds?: ReadonlySet<string>;
+	openPromptsByAgent?: Record<string, number>;
+	latestTodosByAgent?: Record<string, TodoTask[]>;
+	latestSubagentsByAgent?: Record<string, SubagentUpdateEvent[]>;
+}): MeshNode[] {
+	return opts.agents.map((agent) => {
+		const machine = opts.machinesById.get(agent.machine_id);
+		const redacted = Boolean(agent.redacted);
+		return {
+			agentId: agent.id,
+			machineId: agent.machine_id,
+			machineName: machine?.name ?? agent.machine_id,
+			machineColor: machine?.color ?? "#808080",
+			name: opts.disambiguatedNames.get(agent.id) ?? agentDisplayName(agent),
+			cwd: agent.cwd,
+			gitBranch: agent.git_branch,
+			model: agent.model,
+			status: agent.status as MeshNode["status"],
+			activity: redacted ? null : agent.last_preview,
+			online: opts.onlineAgentIds ? opts.onlineAgentIds.has(agent.id) : Boolean(agent.online),
+			role: opts.roleByAgent.get(agent.id) ?? "solo",
+			parentAgentId: opts.parentByAgent.get(agent.id) ?? null,
+			groupId: opts.groupIdByAgent.get(agent.id) ?? null,
+			todos: todoSummary(opts.latestTodosByAgent?.[agent.id], redacted),
+			subagents: latestSubagents(opts.latestSubagentsByAgent?.[agent.id], redacted),
+			lastCommAt: opts.lastCommAtByAgent.get(agent.id) ?? null,
+			openPromptCount: Math.max(0, Math.trunc(opts.openPromptsByAgent?.[agent.id] ?? 0)),
+		};
+	});
+}
+
 export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 	const now = options.now ?? Date.now();
 	const machineFilter = options.machineFilter ?? null;
@@ -439,7 +526,7 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 		.sort((a, b) => a.id.localeCompare(b.id));
 	const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
 	const disambiguatedNames = disambiguateAgentNames(agents);
-	const recentComms = options.comms.filter((comm) => comm.at >= now - DAY_MS);
+	const recentComms = options.comms.filter((comm) => comm.at >= now - DAY);
 	const messages = deduplicateMessages(recentComms, new Set(agentsById.keys()));
 	const edgesById = new Map<string, InternalEdge>();
 	for (const message of messages) {
@@ -453,7 +540,7 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 		edge.messages.push(message);
 	}
 
-	const components = connectedComponents(edgesById);
+	const components = connectedComponents(edgeNeighbors(edgesById));
 	const groups: MeshGroup[] = [];
 	const groupIdByAgent = new Map<string, string>();
 	const roleByAgent = new Map<string, MeshNode["role"]>();
@@ -503,72 +590,19 @@ export function buildMeshSnapshot(options: BuildTopologyOptions): MeshSnapshot {
 		);
 	}
 
-	const edges = [...edgesById.values()]
-		.map((edge) => {
-			const { a, b } = edge;
-			const orderedMessages = edge.messages;
-			const latest = orderedMessages[orderedMessages.length - 1]!;
-			const replies = new Set<string>();
-			const asks: (typeof orderedMessages)[number][] = [];
-			let aToB = 0;
-			let bToA = 0;
-			for (const message of orderedMessages) {
-				if (message.fromAgentId === a && message.toAgentId === b) aToB++;
-				else if (message.fromAgentId === b && message.toAgentId === a) bToA++;
-				if (message.action === "reply" && message.replyTo !== null) {
-					replies.add(message.replyTo);
-				} else if (message.action === "ask") {
-					asks.push(message);
-				}
-			}
-			const latestSender = agentsById.get(latest.fromAgentId);
-			const latestReceiver = agentsById.get(latest.toAgentId);
-			const latestPreview =
-				latestSender?.redacted || latestReceiver?.redacted
-					? null
-					: latest.text === null
-						? null
-						: latest.text.slice(0, 140);
-			return {
-				edgeId: formatEdgeId(a, b),
-				a,
-				b,
-				count: orderedMessages.length,
-				aToB,
-				bToA,
-				lastAt: latest.at,
-				lastFrom: latest.fromAgentId,
-				lastAction: latest.action,
-				lastPreview: latestPreview,
-				pendingAsk: asks.some((message) => !message.messageId || !replies.has(message.messageId)),
-				active: now - latest.at <= ACTIVE_MS,
-			};
-		})
-		.sort((x, y) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
-
-	const nodes: MeshNode[] = agents.map((agent) => {
-		const machine = machinesById.get(agent.machine_id);
-		const redacted = Boolean(agent.redacted);
-		return {
-			agentId: agent.id,
-			machineId: agent.machine_id,
-			machineName: machine?.name ?? agent.machine_id,
-			machineColor: machine?.color ?? "#808080",
-			name: disambiguatedNames.get(agent.id) ?? agentDisplayName(agent),
-			cwd: agent.cwd,
-			gitBranch: agent.git_branch,
-			model: agent.model,
-			status: agent.status as MeshNode["status"],
-			activity: redacted ? null : agent.last_preview,
-			online: Boolean(agent.online),
-			role: roleByAgent.get(agent.id) ?? "solo",
-			parentAgentId: parentByAgent.get(agent.id) ?? null,
-			groupId: groupIdByAgent.get(agent.id) ?? null,
-			todos: todoSummary(options.latestTodosByAgent?.[agent.id], redacted),
-			subagents: latestSubagents(options.latestSubagentsByAgent?.[agent.id], redacted),
-			lastCommAt: lastCommAtByAgent.get(agent.id) ?? null,
-			openPromptCount: Math.max(0, Math.trunc(options.openPromptsByAgent?.[agent.id] ?? 0)),
-		};
+	const edges = buildMeshEdges(edgesById, agentsById, now);
+	const nodes = buildMeshNodes({
+		agents,
+		machinesById,
+		disambiguatedNames,
+		roleByAgent,
+		parentByAgent,
+		groupIdByAgent,
+		lastCommAtByAgent,
+		onlineAgentIds: options.onlineAgentIds,
+		openPromptsByAgent: options.openPromptsByAgent,
+		latestTodosByAgent: options.latestTodosByAgent,
+		latestSubagentsByAgent: options.latestSubagentsByAgent,
 	});
 
 	return {

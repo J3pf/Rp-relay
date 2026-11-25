@@ -1,12 +1,17 @@
 import {
+	type Channel,
 	CloseCode,
 	type Envelope,
 	ErrorCode,
 	errorEnvelope,
+	MIN_PROTOCOL_VERSION,
 	PING_INTERVAL_MS,
 	PONG_TIMEOUT_MS,
+	PROTOCOL_VERSION,
 	parseFrame,
+	validateMessage,
 } from "@j3pf/rp-protocol";
+import type { Logger } from "pino";
 import { WebSocket } from "ws";
 
 /** Conexión abstracta: WebSocket real o adaptador long-poll. */
@@ -134,6 +139,56 @@ export function bindWsGateway(opts: {
 		opts.onClose(code);
 	});
 	opts.socket.on("error", opts.onError);
+}
+
+export type GatewayEnvelopeCheck = "ok" | "invalid" | "closed";
+
+/**
+ * Validates an inbound gateway envelope: closed-conn guard, protocol version, hello-first ordering,
+ * TypeBox schema check, and consistent debug/trace logging.
+ */
+export function validateGatewayEnvelope(opts: {
+	conn: Conn;
+	env: Envelope;
+	channel: Channel;
+	helloType: string;
+	ready: boolean;
+	log: Logger;
+	logContext: Record<string, unknown>;
+	logMessage: string;
+}): GatewayEnvelopeCheck {
+	const { conn, env, channel, helloType, ready, log, logContext, logMessage } = opts;
+	if (conn.closed) return "closed";
+	if (env.v < MIN_PROTOCOL_VERSION || env.v > PROTOCOL_VERSION) {
+		conn.send(
+			errorEnvelope(
+				ErrorCode.BadRequest,
+				`versión de protocolo ${env.v} no soportada (el relay habla v${PROTOCOL_VERSION})`,
+				env.id,
+			),
+		);
+		conn.close(CloseCode.IncompatibleVersion, "incompatible protocol version");
+		return "closed";
+	}
+	if (!ready && env.t !== helloType) {
+		conn.send(errorEnvelope(ErrorCode.BadRequest, `el primer mensaje debe ser ${helloType}`, env.id));
+		conn.close(CloseCode.InvalidFrame, "hello required");
+		return "closed";
+	}
+	const v = validateMessage(channel, env);
+	if (!v.ok) {
+		conn.send(errorEnvelope(ErrorCode.BadRequest, v.message, env.id));
+		if (env.t === helloType) {
+			conn.close(CloseCode.InvalidFrame, "invalid hello");
+			return "closed";
+		}
+		return "invalid";
+	}
+	if (log.isLevelEnabled("trace")) log.trace({ ...logContext, t: env.t, d: env.d }, logMessage);
+	else if (log.isLevelEnabled("debug")) {
+		log.debug({ ...logContext, t: env.t, bytes: JSON.stringify(env.d ?? null).length }, logMessage);
+	}
+	return "ok";
 }
 
 /** Ping WS cada 25 s; si no hay pong en 10 s se termina la conexión (PROTOCOLO §1). */

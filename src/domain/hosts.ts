@@ -8,9 +8,10 @@ import {
 } from "@j3pf/rp-protocol";
 import { ulid } from "ulid";
 import type { Ctx } from "../context.js";
+import { MINUTE } from "../util/time.js";
 import type { AppConn, HostConn } from "../ws/conn.js";
 
-const INITIAL_PROMPT_TTL_MS = 60_000;
+const INITIAL_PROMPT_TTL_MS = MINUTE;
 
 type HostRequestResult = { ok: true; d: any } | { ok: false; code: string; message: string };
 
@@ -61,7 +62,7 @@ export class HostService {
 		repos.machines.setQuotas(conn.machineId, Array.isArray(hello.quotas) ? hello.quotas : null);
 		repos.machines.touch(conn.machineId, Date.now());
 		const prev = hub.registerHost(conn);
-		if (prev) this.cancelPendingForHostConn(prev);
+		if (prev) this.cancelPending((p) => p.hostConn === prev, "el host fue reemplazado");
 		publisher.host(conn.machineId);
 		publisher.machine(conn.machineId);
 	}
@@ -77,105 +78,116 @@ export class HostService {
 	onHostClose(conn: HostConn): void {
 		const { hub, publisher, repos } = this.c();
 		if (!hub.unregisterHost(conn)) return;
-		this.cancelPendingForMachine(conn.machineId);
+		this.cancelPending((p) => p.machineId === conn.machineId, "el host se desconectó");
 		if (!repos.db.open) return;
 		publisher.host(conn.machineId);
 		publisher.machine(conn.machineId);
 	}
 
 	onMachineRevoked(machineId: string): void {
-		this.cancelPendingForMachine(machineId);
+		this.cancelPending((p) => p.machineId === machineId, "el host se desconectó");
 		const prefix = `${machineId}\u0000`;
 		for (const k of this.held.keys()) if (k.startsWith(prefix)) this.held.delete(k);
 		for (const k of this.unclaimed.keys()) if (k.startsWith(prefix)) this.unclaimed.delete(k);
 	}
 
-	private cancelPendingForHostConn(hostConn: HostConn): void {
+	private cancelPending(predicate: (req: PendingReq) => boolean, message: string): void {
 		for (const [id, p] of this.pending) {
-			if (p.hostConn !== hostConn) continue;
+			if (!predicate(p)) continue;
 			clearTimeout(p.timer);
 			this.pending.delete(id);
-			if (p.resolve) p.resolve({ ok: false, code: ErrorCode.HostOffline, message: "el host fue reemplazado" });
-			else p.conn?.send(errorEnvelope(ErrorCode.HostOffline, "el host fue reemplazado", p.reqEnvId));
+			if (p.resolve) p.resolve({ ok: false, code: ErrorCode.HostOffline, message });
+			else p.conn?.send(errorEnvelope(ErrorCode.HostOffline, message, p.reqEnvId));
 		}
 	}
 
-	private cancelPendingForMachine(machineId: string): void {
-		for (const [id, p] of this.pending) {
-			if (p.machineId !== machineId) continue;
-			clearTimeout(p.timer);
-			this.pending.delete(id);
-			if (p.resolve) p.resolve({ ok: false, code: ErrorCode.HostOffline, message: "el host se desconectó" });
-			else p.conn?.send(errorEnvelope(ErrorCode.HostOffline, "el host se desconectó", p.reqEnvId));
+	private dispatchPending(opts: {
+		machineId: string;
+		t: string;
+		body: unknown;
+		conn?: AppConn;
+		reqEnvId?: string;
+		initialPrompt?: string;
+		resolve?: (result: HostRequestResult) => void;
+		onFailure: (code: string, message: string) => void;
+	}): void {
+		let id: string | undefined;
+		let timer: NodeJS.Timeout | undefined;
+		try {
+			const host = this.c().hub.hosts.get(opts.machineId);
+			if (!host || host.closed) {
+				opts.onFailure(ErrorCode.HostOffline, "rp-host no está conectado en esa PC");
+				return;
+			}
+			const reqId = ulid();
+			id = reqId;
+			timer = setTimeout(
+				() => {
+					this.pending.delete(reqId);
+					opts.onFailure(ErrorCode.Timeout, "el host no respondió a tiempo");
+				},
+				(HOST_FORWARD[opts.t] ?? 1) * this.c().config.limits.hostRequestTimeoutMs,
+			);
+			timer.unref();
+			const req: PendingReq = {
+				hostConn: host,
+				machineId: opts.machineId,
+				reqEnvId: opts.reqEnvId,
+				timer,
+				...(opts.conn ? { conn: opts.conn } : {}),
+				...(opts.resolve ? { resolve: opts.resolve } : {}),
+				...(opts.initialPrompt ? { initialPrompt: opts.initialPrompt } : {}),
+			};
+			this.pending.set(reqId, req);
+			if (!host.send(envelope(opts.t, opts.body, { id: reqId }))) {
+				clearTimeout(timer);
+				this.pending.delete(reqId);
+				opts.onFailure(ErrorCode.HostOffline, "no se pudo enviar al host");
+			}
+		} catch {
+			if (timer) clearTimeout(timer);
+			if (id) this.pending.delete(id);
+			opts.onFailure(ErrorCode.HostOffline, "no se pudo enviar al host");
 		}
 	}
 
 	// ---- app → host ----
 	forward(app: AppConn, env: Envelope): void {
-		const { hub, repos } = this.c();
+		const { repos } = this.c();
 		const d = (env.d ?? {}) as { machineId?: string; initialPrompt?: string };
 		const machineId = d.machineId;
 		const reply = (code: string, msg: string) => app.send(errorEnvelope(code, msg, env.id));
 		if (!machineId) return void reply(ErrorCode.BadRequest, "falta machineId");
 		const m = repos.machines.get(machineId);
 		if (!m || m.revoked_at) return void reply(ErrorCode.NotFound, "PC desconocida");
-		const host = hub.hosts.get(machineId);
-		if (!host) return void reply(ErrorCode.HostOffline, "rp-host no está conectado en esa PC");
 
-		const id = ulid();
-		const timer = setTimeout(
-			() => {
-				this.pending.delete(id);
-				app.send(errorEnvelope(ErrorCode.Timeout, "el host no respondió a tiempo", env.id));
-			},
-			(HOST_FORWARD[env.t] ?? 1) * this.c().config.limits.hostRequestTimeoutMs,
-		);
-		timer.unref();
-		const req: PendingReq = { conn: app, hostConn: host, machineId, reqEnvId: env.id, timer };
-		if (env.t === "host.spawn" && typeof d.initialPrompt === "string" && d.initialPrompt)
-			req.initialPrompt = d.initialPrompt;
-		this.pending.set(id, req);
 		// el host no necesita el texto inicial: lo entrega el relay al agente
 		const body = { ...(env.d as object) } as Record<string, unknown>;
+		const initialPrompt =
+			env.t === "host.spawn" && typeof d.initialPrompt === "string" && d.initialPrompt ? d.initialPrompt : undefined;
 		if (env.t === "host.spawn") delete body.initialPrompt;
-		if (!host.send(envelope(env.t, body, { id }))) {
-			clearTimeout(timer);
-			this.pending.delete(id);
-			reply(ErrorCode.HostOffline, "no se pudo enviar al host");
-		}
+
+		this.dispatchPending({
+			machineId,
+			t: env.t,
+			body,
+			conn: app,
+			reqEnvId: env.id,
+			initialPrompt,
+			onFailure: reply,
+		});
 	}
 
 	/** Sends an RPC initiated by the relay and resolves every failure as a result. */
 	request(machineId: string, t: string, d: any): Promise<HostRequestResult> {
 		return new Promise((resolve) => {
-			let id: string | undefined;
-			let timer: NodeJS.Timeout | undefined;
-			try {
-				const host = this.c().hub.hosts.get(machineId);
-				if (!host || host.closed) {
-					resolve({ ok: false, code: ErrorCode.HostOffline, message: "rp-host no está conectado en esa PC" });
-					return;
-				}
-				id = ulid();
-				timer = setTimeout(
-					() => {
-						this.pending.delete(id!);
-						resolve({ ok: false, code: ErrorCode.Timeout, message: "el host no respondió a tiempo" });
-					},
-					(HOST_FORWARD[t] ?? 1) * this.c().config.limits.hostRequestTimeoutMs,
-				);
-				timer.unref();
-				this.pending.set(id, { hostConn: host, machineId, reqEnvId: undefined, timer, resolve });
-				if (!host.send(envelope(t, d, { id }))) {
-					clearTimeout(timer);
-					this.pending.delete(id);
-					resolve({ ok: false, code: ErrorCode.HostOffline, message: "no se pudo enviar al host" });
-				}
-			} catch {
-				if (timer) clearTimeout(timer);
-				if (id) this.pending.delete(id);
-				resolve({ ok: false, code: ErrorCode.HostOffline, message: "no se pudo enviar al host" });
-			}
+			this.dispatchPending({
+				machineId,
+				t,
+				body: d,
+				resolve,
+				onFailure: (code, message) => resolve({ ok: false, code, message }),
+			});
 		});
 	}
 

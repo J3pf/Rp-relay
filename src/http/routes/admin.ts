@@ -5,6 +5,8 @@ import { bearer, safeEqual } from "../../auth/tokens.js";
 import { adminTokenPath } from "../../config.js";
 import type { Ctx } from "../../context.js";
 import { RelayError } from "../../util/errors.js";
+import { isLoopbackAddress } from "../../util/loopback.js";
+import { MINUTE } from "../../util/time.js";
 import type { TypeBoxFastifyInstance } from "../server.js";
 
 /**
@@ -34,8 +36,8 @@ export function registerAdmin(app: TypeBoxFastifyInstance, c: () => Ctx): void {
 		)
 			throw new RelayError("unauthorized", "no disponible a través de proxy");
 		const remote = req.raw?.socket?.remoteAddress;
-		const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
-		if (!isLoopback) throw new RelayError("unauthorized", "acceso administrativo restringido a loopback");
+		if (!isLoopbackAddress(remote))
+			throw new RelayError("unauthorized", "acceso administrativo restringido a loopback");
 		const ipKey = remote ?? "local";
 		const now = Date.now();
 		const entry = failedAttempts.get(ipKey);
@@ -50,7 +52,7 @@ export function registerAdmin(app: TypeBoxFastifyInstance, c: () => Ctx): void {
 		if (!tok || !given || !safeEqual(tok, given)) {
 			const cur = entry && entry.resetAt > now ? entry.count + 1 : 1;
 			if (failedAttempts.size >= 100 && !failedAttempts.has(ipKey)) failedAttempts.clear();
-			failedAttempts.set(ipKey, { count: cur, resetAt: now + 60_000 });
+			failedAttempts.set(ipKey, { count: cur, resetAt: now + MINUTE });
 			throw new RelayError("unauthorized", "token de administración inválido");
 		}
 		failedAttempts.delete(ipKey);

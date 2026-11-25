@@ -1,5 +1,6 @@
 import { type Static, Type } from "@sinclair/typebox";
 import { AgentStatus, Id, Nullable, OptNullable, SubagentUpdateEvent } from "./common.js";
+import { MAX_PREVIEW_CHARS } from "./constants.js";
 
 export const CommPeer = Type.Object({
 	sessionId: Nullable(Type.String()),
@@ -112,7 +113,7 @@ export const MeshEdge = Type.Object({
 	lastAt: Type.Number(),
 	lastFrom: Id,
 	lastAction: Type.String(),
-	lastPreview: Nullable(Type.String({ maxLength: 140 })),
+	lastPreview: Nullable(Type.String({ maxLength: MAX_PREVIEW_CHARS })),
 	pendingAsk: Type.Boolean(),
 	active: Type.Boolean(),
 });

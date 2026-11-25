@@ -24,4 +24,32 @@ describe("fitBody long-field guard", () => {
 		expect(JSON.stringify(input)).toBe(snapshot);
 		expect(JSON.stringify(fitBody(input, max))).toBe(JSON.stringify(out));
 	});
+
+	it("drops optional overflow fields in priority order while preserving required keys", () => {
+		const input = {
+			...base,
+			detail: "d".repeat(200),
+			preview: "p".repeat(200),
+			agentLabel: "l".repeat(200),
+			options: [
+				{ id: "1", label: "One" },
+				{ id: "2", label: "Two" },
+				{ id: "3", label: "Three" },
+				{ id: "4", label: "Four" },
+			],
+			extra: { nested: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+		};
+		const snapshot = JSON.stringify(input);
+		const out = fitBody(input, 140);
+		expect(bytes(out)).toBeLessThanOrEqual(140);
+		expect(JSON.stringify(input)).toBe(snapshot);
+		expect("promptId" in out).toBe(true);
+		expect("agentId" in out).toBe(true);
+		expect("pushId" in out).toBe(true);
+		expect("machineId" in out).toBe(true);
+		expect("kind" in out).toBe(true);
+		expect("category" in out).toBe(true);
+		expect(out.detail).toBeUndefined();
+		expect(out.preview).toBeUndefined();
+	});
 });

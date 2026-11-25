@@ -6,18 +6,16 @@ import {
 	type Envelope,
 	ErrorCode,
 	errorEnvelope,
-	MIN_PROTOCOL_VERSION,
-	PROTOCOL_VERSION,
 	type PromptOpen,
 	type PromptResolved,
 	parseFrame,
 	type UserMessageAck,
-	validateMessage,
 } from "@j3pf/rp-protocol";
 import type { WebSocket } from "ws";
 import type { Ctx } from "../context.js";
 import type { MachineRow } from "../db/repos/index.js";
-import { type AgentConn, bindWsGateway, startHeartbeat, WsConn } from "./conn.js";
+import { MINUTE } from "../util/time.js";
+import { type AgentConn, bindWsGateway, startHeartbeat, validateGatewayEnvelope, WsConn } from "./conn.js";
 import { LongPollConn } from "./longpoll.js";
 
 /** Máquina de estados del protocolo plugin → relay; la comparten el transporte WS y el long-poll. */
@@ -35,40 +33,18 @@ export class AgentSession {
 
 	/** Procesa un sobre ya parseado. Devuelve false si la sesión ya estaba cerrada. */
 	handle(env: Envelope): boolean {
-		if (this.conn.closed) return false;
 		const { log } = this.c();
-		if (env.v < MIN_PROTOCOL_VERSION || env.v > PROTOCOL_VERSION) {
-			this.conn.send(
-				errorEnvelope(
-					ErrorCode.BadRequest,
-					`versión de protocolo ${env.v} no soportada (el relay habla v${PROTOCOL_VERSION})`,
-					env.id,
-				),
-			);
-			this.conn.close(CloseCode.IncompatibleVersion, "incompatible protocol version");
-			return false;
-		}
-		if (!this.helloDone && env.t !== "agent.hello") {
-			this.conn.send(errorEnvelope(ErrorCode.BadRequest, "el primer mensaje debe ser agent.hello", env.id));
-			this.conn.close(CloseCode.InvalidFrame, "hello required");
-			return false;
-		}
-		const v = validateMessage("up", env);
-		if (!v.ok) {
-			this.conn.send(errorEnvelope(ErrorCode.BadRequest, v.message, env.id));
-			if (env.t === "agent.hello") {
-				this.conn.close(CloseCode.InvalidFrame, "invalid hello");
-				return false;
-			}
-			return true;
-		}
-		if (log.isLevelEnabled("trace")) log.trace({ agentId: this.conn.agentId, t: env.t, d: env.d }, "plugin → relay");
-		else if (log.isLevelEnabled("debug")) {
-			log.debug(
-				{ agentId: this.conn.agentId, t: env.t, bytes: JSON.stringify(env.d ?? null).length },
-				"plugin → relay",
-			);
-		}
+		const check = validateGatewayEnvelope({
+			conn: this.conn,
+			env,
+			channel: "up",
+			helloType: "agent.hello",
+			ready: this.helloDone,
+			log,
+			logContext: { agentId: this.conn.agentId },
+			logMessage: "plugin → relay",
+		});
+		if (check !== "ok") return check === "invalid";
 		try {
 			this.dispatch(env);
 		} catch (e) {
@@ -180,7 +156,7 @@ export class LongPollRegistry {
 
 	constructor(
 		private c: () => Ctx,
-		private idleMs = 60_000,
+		private idleMs = MINUTE,
 	) {
 		this.sweeper = setInterval(() => this.sweep(), 10_000);
 		this.sweeper.unref();

@@ -13,6 +13,8 @@ import {
 import { openDb } from "../db/index.js";
 import { currentVersion, readMigrations } from "../db/migrate.js";
 import { isFileTls } from "../tls/index.js";
+import { isLoopbackHost } from "../util/loopback.js";
+import { DAY, HOUR } from "../util/time.js";
 import { c } from "./util.js";
 
 type Level = "ok" | "warn" | "fail";
@@ -21,8 +23,6 @@ export interface Check {
 	level: Level;
 	detail: string;
 }
-
-const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" || host === "::1" || host === "localhost";
 
 function checkFileMode(filePath: string): { mode: number; lax: boolean } | null {
 	if (!existsSync(filePath)) return null;
@@ -132,7 +132,7 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 	else if (backups.length === 0)
 		add("Copias de seguridad", "warn", "todavía no hay copias (se crean cada hora con el relay en marcha)");
 	else {
-		const age = (Date.now() - backups[0]!.mtimeMs) / 3_600_000;
+		const age = (Date.now() - backups[0]!.mtimeMs) / HOUR;
 		add(
 			"Copias de seguridad",
 			age > (config.backup.intervalMinutes / 60) * 3 + 1 ? "warn" : "ok",
@@ -186,7 +186,7 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 		if (isFileTls(config.tls)) {
 			try {
 				const exp = new X509Certificate(readFileSync(config.tls.cert)).validToDate;
-				const days = Math.round((exp.getTime() - Date.now()) / 86_400_000);
+				const days = Math.round((exp.getTime() - Date.now()) / DAY);
 				add("TLS (certificado)", days < 0 ? "fail" : days < 14 ? "warn" : "ok", `caduca en ${days} días`);
 			} catch (e) {
 				add("TLS (certificado)", "fail", (e as Error).message);
@@ -207,7 +207,13 @@ export async function runDoctor(opts: { fetchImpl?: typeof fetch } = {}): Promis
 	// publicUrl alcanzable + reloj
 	if (!/^https?:\/\//.test(config.publicUrl)) add("publicUrl", "fail", `${config.publicUrl} no es una URL http(s)`);
 	else {
-		if (config.publicUrl.startsWith("http://") && !/\/\/(127\.|localhost|\[::1\])/.test(config.publicUrl))
+		let publicHost: string | null = null;
+		try {
+			publicHost = new URL(config.publicUrl).hostname;
+		} catch {
+			publicHost = null;
+		}
+		if (config.publicUrl.startsWith("http://") && !isLoopbackHost(publicHost))
 			add("publicUrl", "warn", "usa http:// fuera de loopback: la app Android exige TLS");
 		try {
 			const t0 = Date.now();

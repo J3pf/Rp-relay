@@ -11,6 +11,7 @@ import {
 	UserMessageAck,
 	UserMessageBody,
 } from "./common.js";
+import { MAX_PREVIEW_CHARS } from "./constants.js";
 
 export const MachineSummary = Type.Object({
 	machineId: Id,
@@ -41,7 +42,7 @@ export const AgentSummary = Type.Object({
 	online: Type.Boolean(),
 	lastSeenAt: Type.Number(),
 	openPromptCount: Type.Integer({ minimum: 0 }),
-	lastMessagePreview: OptNullable(Type.String({ maxLength: 140 })),
+	lastMessagePreview: OptNullable(Type.String({ maxLength: MAX_PREVIEW_CHARS })),
 	launcher: OptNullable(Type.String()),
 	herdr: OptNullable(Type.Unknown()),
 	gentleMode: OptNullable(Type.String()),
@@ -63,7 +64,7 @@ export const ArchivedAgentSummary = Type.Object({
 	cwd: OptNullable(Type.String()),
 	archivedAt: Type.Number(),
 	lastSeenAt: Type.Number(),
-	lastMessagePreview: OptNullable(Type.String({ maxLength: 140 })),
+	lastMessagePreview: OptNullable(Type.String({ maxLength: MAX_PREVIEW_CHARS })),
 	messageCount: Type.Integer({ minimum: 0 }),
 });
 export type ArchivedAgentSummary = Static<typeof ArchivedAgentSummary>;

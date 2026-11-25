@@ -5,6 +5,7 @@ import { adminTokenPath, type Config, dbPath, loadConfig } from "../config.js";
 import { openDb } from "../db/index.js";
 import { migrate } from "../db/migrate.js";
 import { Repos } from "../db/repos/index.js";
+import { isLoopbackHost } from "../util/loopback.js";
 
 export const c = {
 	green: (s: string) => (process.stdout.isTTY ? `\x1b[32m${s}\x1b[0m` : s),
@@ -73,9 +74,7 @@ export async function adminCall<T = unknown>(
 					...(payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : {}),
 				},
 				// el certificado es del dominio público, no de 127.0.0.1; sólo desactivar validación en loopback
-				...(proto === "https" && (host === "127.0.0.1" || host === "::1" || host === "localhost")
-					? { rejectUnauthorized: false }
-					: {}),
+				...(proto === "https" && isLoopbackHost(host) ? { rejectUnauthorized: false } : {}),
 			},
 			(res) => {
 				const chunks: Buffer[] = [];

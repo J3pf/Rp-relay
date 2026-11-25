@@ -1,4 +1,4 @@
-import { type Envelope, envelope } from "@j3pf/rp-protocol";
+import { envelope } from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
 
 /** Difusión de cambios de estado a las apps (machines.update, agents.update, hosts.update). */
@@ -79,9 +79,5 @@ export class Publisher {
 		this.c().hub.broadcastApps(envelope("hosts.update", { upsert: [], remove: [machineId] }), {
 			mode: "foreground",
 		});
-	}
-
-	toApps(env: Envelope, mode?: "foreground" | "direct"): void {
-		this.c().hub.broadcastApps(env, mode ? { mode } : {});
 	}
 }

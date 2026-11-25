@@ -39,13 +39,23 @@ Mirror: pending (workspace root is ambiguous across sibling repos in Engram)
 - Scope top-level `permissions: { contents: read }` in `.github/workflows/ci.yml` and `.github/workflows/release.yml` with minimal per-job write permissions.
 - Fix `test/push.test.ts` 23:59 UTC quiet-hours flake, fix tautological assertion in `test/cli.test.ts:267`, and clean up `/tmp` fixtures in `test/resilience.test.ts:297-314`.
 
+### S6 — R2 Readability refactors, shared constants & load harness stress modes (`W-16` remaining, `S-03` remaining, `S-04` remaining)
+- Extract `validateGatewayEnvelope(...)` in `src/ws/conn.ts` and reuse across `agentGateway.ts`, `appGateway.ts`, and `hostGateway.ts`; use `this.reply(...)` consistently in `appGateway.ts`.
+- Decompose `AgentService.onEvent()` in `src/domain/agents.ts` into focused helpers (`resolveCommPeer`, `persistCommEvent`, `applyEventProjection`, `dispatchEventSideEffects`), hoist `ACTIVITY_EVENT_TYPES` + `ACTIVITY_TOUCH_THROTTLE_MS`, and remove the redundant `e.type === "tool_execution_update"` check.
+- Refactor `src/domain/mesh/topology.ts` & `src/domain/mesh/service.ts`: export `MESH_EDGE_ACTIVE_MS = 20_000` and `commEndpoints`, share one `connectedComponents(neighbors)` helper, split `buildMeshSnapshot` into `buildMeshEdges` / `buildMeshNodes`, reuse `DAY` from `src/util/time.ts`, reuse `repos.prompts.countOpenByAgent()`, and pass live online IDs (`hub.agents`) into `buildMeshSnapshot` as single source of truth for `online`.
+- Refactor `fitBody()` in `src/push/dispatcher.ts` using `structuredClone` and small named stage helpers with module-level field-priority constants.
+- Extract shared loopback helpers (`isLoopbackAddress`, `isLoopbackHost`) in `src/util/loopback.ts` used by `http/server.ts`, `http/routes/admin.ts`, `ws/index.ts`, `cli/util.ts`, and `cli/doctor.ts`; unify `HostService`'s pending-request dispatch and `cancelPending(predicate, message)` helpers in `src/domain/hosts.ts`.
+- Export `MAX_PREVIEW_CHARS = 140` from `packages/protocol/src/constants.ts`, share preview truncation across `agents.ts` and `topology.ts`, adopt `MINUTE`/`HOUR`/`DAY` from `src/util/time.ts` instead of raw `60_000`/`3_600_000`/`86_400_000`, name `DEDUP_OVERFETCH_FACTOR` in `routes/mesh.ts` & comms retention constants in `retention.ts`, and remove unused `Publisher.toApps` (if unused).
+- Add optional `--mesh`, `--backup`, and `--slow-consumer` stress modes to `test/load/load.ts` & `test/load/generator.ts` without slowing down `test/load-smoke.test.ts`.
+
 ## Tasks
 
 - [x] **T1** (`S1`) — Transport, WS upgrade DoS, proxy/rate-limit, slow-consumer eviction & long-poll disconnect | Route: delegated (`odd-writer`, parallel with T4) | Status: done | Commit: `4252fe3` (37 files / 465 tests green)
 - [x] **T2** (`S2`) — Periodic safety, APNs HTTP/2 hardening, shutdown & healthcheck observability | Route: delegated (`odd-writer`, parallel with T3) | Status: done | Commit: `27e6d8a` (39 files / 492 tests green)
 - [x] **T3** (`S3`) — Backup/restore WAL integrity, atomic ACME TLS, SQLite `busy_timeout`, BlobStore quota & doctor | Route: delegated (`odd-writer`, parallel with T2) | Status: done | Commit: `9696a0b` (39 files / 492 tests green)
 - [x] **T4** (`S4`) — Domain, redaction, history tail gap, mesh & repo correctness | Route: delegated (`odd-writer`, parallel with T1) | Status: done | Commit: `c0111ec` (37 files / 465 tests green)
-- [x] **T5** (`S5`) — Protocol/TypeBox typing, package lockstep, CI permissions & test determinism | Route: delegated (`odd-writer`) | Status: done | Commit: pending-final-commit (39 files / 495 tests green)
+- [x] **T5** (`S5`) — Protocol/TypeBox typing, package lockstep, CI permissions & test determinism | Route: delegated (`odd-writer`) | Status: done | Commit: `e85944c` (39 files / 495 tests green)
+- [x] **T6** (`S6`) — R2 Readability refactors, shared constants & load harness stress modes | Route: delegated (`odd-writer`) | Status: done | Commit: committed-below (39 files / 499 tests + live load stress green)
 
 ## Log
 
@@ -53,4 +63,6 @@ Mirror: pending (workspace root is ambiguous across sibling repos in Engram)
 - **L2 (2026-11-24)**: Created feature branch `fix/4r-hardening` from `main` (`3cc6065`) in `Rp-relay`. Split into 5 cohesive work-unit commits (`T1`–`T5`). Launching Wave 1 (`T1` + `T4`, strictly disjoint edit surfaces).
 - **L3 (2026-11-24)**: Wave 1 verified (`npm run check`: 37 passed / 465 tests passed, biome + tsc + build clean). Committed `T1` (`4252fe3`) and `T4` (`c0111ec`). Launching Wave 2 (`T2` + `T3`, strictly disjoint edit surfaces).
 - **L4 (2026-11-24)**: Wave 2 verified (`npm run check`: 39 passed / 492 tests passed, biome + tsc + build clean). Committed `T2` (`27e6d8a`) and `T3` (`9696a0b`). Launching final unit `T5` (protocol/TypeBox, package lockstep, CI permissions, test determinism).
-- **L5 (2026-11-24)**: `T5` verified (`npm run check`: 39 passed / 495 tests passed, biome + tsc + build clean). All 5 work-unit commits complete on `fix/4r-hardening`; launching independent feature-end verifier on `3cc6065..HEAD`.
+- **L5 (2026-11-24)**: `T5` verified (`npm run check`: 39 passed / 495 tests passed, biome + tsc + build clean). All 5 work-unit commits complete on `fix/4r-hardening`; independent verifier returned PASS on S1–S5.
+- **L6 (2026-11-24)**: User follow-up verbatim: `"Ok si hagamos todo lo demás...."` (excluding third-party CI SHAs and the 4 caveat items). Added `S6`/`T6` for remaining R2 refactors, shared constants, and load-harness stress modes.
+- **L7 (2026-11-24)**: `T6` verified (`npm run check`: 39 passed / 499 tests passed, biome 0 errors, `tsc` + `tsc -b` clean, and `test/load/load.ts --mesh --backup --slow-consumer` passed with 0 lost finals / 0 backup errors). Committing `T6` and launching verifier on `S6`.

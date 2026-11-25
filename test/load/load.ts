@@ -1,7 +1,7 @@
 /**
  * Prueba de carga manual (RESILIENCIA §4 / PLAN-RELAY §11): 50 agentes × 20 ev/s durante 5 min.
  *
- *   npm run test:load -- [--agents 50] [--rate 20] [--duration 300] [--apps 2] [--p99 50]
+ *   npm run test:load -- [--agents 50] [--rate 20] [--duration 300] [--apps 2] [--p99 50] [--mesh] [--backup] [--slow-consumer]
  *
  * Arranca el relay como PROCESO APARTE (para no medir el bucle de eventos del generador) con una base temporal,
  * mide la latencia de reenvío (agente → app) y la memoria del relay, y sale con código 1 si p99 supera el objetivo o
@@ -24,6 +24,9 @@ const { values } = parseArgs({
 		duration: { type: "string", default: "300" },
 		apps: { type: "string", default: "2" },
 		p99: { type: "string", default: "50" },
+		mesh: { type: "boolean", default: false },
+		backup: { type: "boolean", default: false },
+		"slow-consumer": { type: "boolean", default: false },
 	},
 });
 
@@ -47,7 +50,7 @@ async function main() {
 			listen: { host: "127.0.0.1", port },
 			publicUrl: `http://127.0.0.1:${port}`,
 			logLevel: "warn",
-			backup: { enabled: false },
+			backup: { enabled: Boolean(values.backup) },
 		}),
 	);
 	const bin = join(ROOT, "node_modules", ".bin", "tsx");
@@ -102,6 +105,20 @@ async function main() {
 			apps: Number(values.apps),
 			rate: Number(values.rate),
 			durationSec: Number(values.duration),
+			mesh: Boolean(values.mesh),
+			slowConsumer: Boolean(values["slow-consumer"]),
+			...(values.backup
+				? {
+						backup: {
+							trigger: () =>
+								new Promise<boolean>((resolve) => {
+									const p = run(["backup", "now"]);
+									p.on("exit", (code) => resolve(code === 0));
+									p.on("error", () => resolve(false));
+								}),
+						},
+					}
+				: {}),
 			log: (m) => console.log(m),
 			pair: async () => {
 				const m = await (
@@ -130,8 +147,12 @@ async function main() {
 		console.log(JSON.stringify(res, null, 2));
 		const expectedEventsPerSec = Number(values.agents) * Number(values.rate);
 		const minEventsPerSec = Math.floor(expectedEventsPerSec * TARGET_THROUGHPUT_RATIO);
+		const backupOk = !values.backup || (res.backupErrors ?? 0) === 0;
 		const ok =
-			res.latencyMs.p99 < Number(values.p99) && res.lostFinals === 0 && res.aggregateEventsPerSec >= minEventsPerSec;
+			res.latencyMs.p99 < Number(values.p99) &&
+			res.lostFinals === 0 &&
+			res.aggregateEventsPerSec >= minEventsPerSec &&
+			backupOk;
 		console.log(
 			ok
 				? `OK: p99 ${res.latencyMs.p99} ms < ${values.p99} ms, throughput ${res.aggregateEventsPerSec} ev/s >= ${minEventsPerSec} ev/s (esperado ${expectedEventsPerSec} ev/s * ${TARGET_THROUGHPUT_RATIO}) y sin pérdidas de eventos finales`

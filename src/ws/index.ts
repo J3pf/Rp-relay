@@ -6,6 +6,8 @@ import { type WebSocket, WebSocketServer } from "ws";
 import type { AuthResult } from "../auth/middleware.js";
 import { effectiveTrustProxy } from "../config.js";
 import type { Ctx } from "../context.js";
+import { isLoopbackAddress, normalizeIp } from "../util/loopback.js";
+import { MINUTE } from "../util/time.js";
 import { handleAgentSocket } from "./agentGateway.js";
 import { handleAppSocket } from "./appGateway.js";
 import { handleHostSocket } from "./hostGateway.js";
@@ -15,15 +17,6 @@ type TrustMatcher = (addr: string, hopIndex: number) => boolean;
 
 const MAX_FAILED_UPGRADES_PER_MIN = 30;
 const MAX_FAILED_UPGRADE_ENTRIES = 1_000;
-
-function normalizeIp(ip: string): string {
-	const trimmed = ip.trim();
-	if (trimmed.toLowerCase().startsWith("::ffff:")) {
-		const v4 = trimmed.slice(7);
-		if (isIP(v4) === 4) return v4;
-	}
-	return trimmed;
-}
 
 function addTrustRule(bl: BlockList, token: string): void {
 	const lower = token.toLowerCase();
@@ -67,6 +60,7 @@ function buildTrustMatcher(trustProxy: boolean | number | string): TrustMatcher 
 	if (trustProxy === false || trustProxy === 0) return () => false;
 	if (trustProxy === true) return () => true;
 	if (typeof trustProxy === "number") return (_addr, hopIndex) => hopIndex < trustProxy;
+	if (trustProxy.trim().toLowerCase() === "loopback") return (addr) => isLoopbackAddress(addr);
 	const bl = new BlockList();
 	for (const part of trustProxy.split(",")) {
 		const token = part.trim();
@@ -146,7 +140,7 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 				failedUpgrades.delete(k);
 			}
 		}
-		failedUpgrades.set(ip, { count: 1, resetAt: now + 60_000 });
+		failedUpgrades.set(ip, { count: 1, resetAt: now + MINUTE });
 		return true;
 	};
 

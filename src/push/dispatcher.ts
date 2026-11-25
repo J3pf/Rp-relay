@@ -32,6 +32,18 @@ const TTL_OTHER = 10 * MINUTE;
 const MAX_BODY_BYTES = 3000;
 const APNS_MAX_BODY_BYTES = 2900;
 const DEFAULT_PUSH_RETRY_DELAY_MS = 100;
+const FIT_BODY_CLIP_PRIORITY = ["detail", "preview", "agentLabel", "machineContext", "machineName"] as const;
+const FIT_BODY_DROP_PRIORITY = [
+	"detail",
+	"preview",
+	"agentLabel",
+	"machineContext",
+	"machineName",
+	"title",
+	"message",
+	"options",
+] as const;
+const FIT_BODY_REQUIRED_KEYS = new Set(["promptId", "agentId", "pushId", "machineId", "kind", "category"]);
 
 export interface PushDispatcherOptions {
 	retryDelayMs?: number;
@@ -80,6 +92,84 @@ async function sendWithRetry(
 	}
 }
 
+type StringRef = { get: () => string; set: (value: string) => void };
+
+function serializedBytes(value: unknown): number {
+	return Buffer.byteLength(JSON.stringify(value));
+}
+
+function applyLegacyTrim(out: Record<string, unknown>, maxBytes: number): void {
+	if (typeof out.message === "string") {
+		const over = serializedBytes(out) - maxBytes;
+		const keep = Math.max(0, Buffer.byteLength(out.message) - over - 3);
+		out.message = `${Buffer.from(out.message).subarray(0, keep).toString("utf8").replace(/�$/, "")}…`;
+	}
+	if (serializedBytes(out) > maxBytes && Array.isArray(out.options))
+		out.options = (out.options as unknown[]).slice(0, 3);
+	if (serializedBytes(out) > maxBytes && typeof out.title === "string") out.title = `${out.title.slice(0, 120)}…`;
+}
+
+function collectStringRefs(value: unknown, set: (next: unknown) => void, refs: StringRef[]): void {
+	if (typeof value === "string") {
+		refs.push({ get: () => value, set: (next) => set(next) });
+	} else if (Array.isArray(value)) {
+		for (let index = 0; index < value.length; index++) {
+			collectStringRefs(value[index], (next) => (value[index] = next), refs);
+		}
+	} else if (value && typeof value === "object") {
+		for (const key of Object.keys(value).sort()) {
+			collectStringRefs(
+				(value as Record<string, unknown>)[key],
+				(next) => ((value as Record<string, unknown>)[key] = next),
+				refs,
+			);
+		}
+	}
+}
+
+function clipStringRefToBudget(out: Record<string, unknown>, ref: StringRef, maxBytes: number): void {
+	const chars = Array.from(ref.get());
+	let low = 0;
+	let high = chars.length;
+	let best: string | undefined;
+	while (low <= high) {
+		const mid = Math.floor((low + high) / 2);
+		const candidate = `${chars.slice(0, mid).join("")}${mid < chars.length ? "…" : ""}`;
+		ref.set(candidate);
+		if (serializedBytes(out) <= maxBytes) {
+			best = candidate;
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+	ref.set(best ?? "");
+}
+
+function clipBodyStrings(out: Record<string, unknown>, maxBytes: number): void {
+	const clipOrder = [...FIT_BODY_CLIP_PRIORITY, ...Object.keys(out).sort()];
+	for (const key of new Set(clipOrder)) {
+		if (serializedBytes(out) <= maxBytes) break;
+		const refs: StringRef[] = [];
+		collectStringRefs(out[key], (next) => (out[key] = next), refs);
+		for (const ref of refs) {
+			if (serializedBytes(out) <= maxBytes) break;
+			clipStringRefToBudget(out, ref, maxBytes);
+		}
+	}
+}
+
+function dropOverflowFields(out: Record<string, unknown>, maxBytes: number): void {
+	for (const key of new Set([...FIT_BODY_DROP_PRIORITY, ...Object.keys(out).sort()])) {
+		if (serializedBytes(out) <= maxBytes) break;
+		if (!FIT_BODY_REQUIRED_KEYS.has(key)) delete out[key];
+	}
+	for (const key of Object.keys(out).sort()) {
+		if (serializedBytes(out) <= maxBytes) break;
+		delete out[key];
+	}
+}
+
 /**
  * Fits the serialized body to its channel budget. Preserve the legacy trim order (message, options, title), then
  * clip remaining strings in fixed order (detail, preview, agentLabel, machineContext, machineName, then sorted keys);
@@ -87,89 +177,16 @@ async function sendWithRetry(
  */
 export function fitBody<T extends Record<string, unknown>>(body: T, maxBytes = MAX_BODY_BYTES): T {
 	const out: Record<string, unknown> = { ...body };
-	const size = () => Buffer.byteLength(JSON.stringify(out));
-	if (size() <= maxBytes) return out as T;
-	if (typeof out.message === "string") {
-		const over = size() - maxBytes;
-		const keep = Math.max(0, Buffer.byteLength(out.message) - over - 3);
-		out.message = `${Buffer.from(out.message).subarray(0, keep).toString("utf8").replace(/�$/, "")}…`;
-	}
-	if (size() > maxBytes && Array.isArray(out.options)) out.options = (out.options as unknown[]).slice(0, 3);
-	if (size() > maxBytes && typeof out.title === "string") out.title = `${out.title.slice(0, 120)}…`;
-	if (size() <= maxBytes) return out as T;
+	if (serializedBytes(out) <= maxBytes) return out as T;
+	applyLegacyTrim(out, maxBytes);
+	if (serializedBytes(out) <= maxBytes) return out as T;
 
-	const clone = (value: unknown): unknown => {
-		if (Array.isArray(value)) return value.map(clone);
-		if (value && typeof value === "object")
-			return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, clone(nested)]));
-		return value;
-	};
-	for (const key of Object.keys(out)) out[key] = clone(out[key]);
-
-	type StringRef = { get: () => string; set: (value: string) => void };
-	const collectStrings = (value: unknown, set: (next: unknown) => void, refs: StringRef[]): void => {
-		if (typeof value === "string") {
-			refs.push({ get: () => value, set: (next) => set(next) });
-		} else if (Array.isArray(value)) {
-			for (let index = 0; index < value.length; index++) {
-				collectStrings(value[index], (next) => (value[index] = next), refs);
-			}
-		} else if (value && typeof value === "object") {
-			for (const key of Object.keys(value).sort()) {
-				collectStrings(
-					(value as Record<string, unknown>)[key],
-					(next) => ((value as Record<string, unknown>)[key] = next),
-					refs,
-				);
-			}
-		}
-	};
-	const clipOrder = ["detail", "preview", "agentLabel", "machineContext", "machineName", ...Object.keys(out).sort()];
-	for (const key of new Set(clipOrder)) {
-		if (size() <= maxBytes) break;
-		const refs: StringRef[] = [];
-		collectStrings(out[key], (next) => (out[key] = next), refs);
-		for (const ref of refs) {
-			if (size() <= maxBytes) break;
-			const chars = Array.from(ref.get());
-			let low = 0;
-			let high = chars.length;
-			let best: string | undefined;
-			while (low <= high) {
-				const mid = Math.floor((low + high) / 2);
-				const candidate = `${chars.slice(0, mid).join("")}${mid < chars.length ? "…" : ""}`;
-				ref.set(candidate);
-				if (size() <= maxBytes) {
-					best = candidate;
-					low = mid + 1;
-				} else high = mid - 1;
-			}
-			ref.set(best ?? "");
-		}
+	const cloned = structuredClone(out);
+	clipBodyStrings(cloned, maxBytes);
+	if (serializedBytes(cloned) > maxBytes) {
+		dropOverflowFields(cloned, maxBytes);
 	}
-
-	if (size() > maxBytes) {
-		const optionalOrder = [
-			"detail",
-			"preview",
-			"agentLabel",
-			"machineContext",
-			"machineName",
-			"title",
-			"message",
-			"options",
-		];
-		const required = new Set(["promptId", "agentId", "pushId", "machineId", "kind", "category"]);
-		for (const key of new Set([...optionalOrder, ...Object.keys(out).sort()])) {
-			if (size() <= maxBytes) break;
-			if (!required.has(key)) delete out[key];
-		}
-		for (const key of Object.keys(out).sort()) {
-			if (size() <= maxBytes) break;
-			delete out[key];
-		}
-	}
-	return out as T;
+	return cloned as T;
 }
 
 export function buildApnsPayload(pushKey: Buffer, kind: PushKindName, body: Record<string, unknown>) {

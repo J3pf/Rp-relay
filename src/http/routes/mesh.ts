@@ -17,6 +17,7 @@ import type { TypeBoxFastifyInstance } from "../server.js";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;
+const DEDUP_OVERFETCH_FACTOR = 3;
 
 function clampedLimit(limit: number | undefined): number {
 	return Math.max(1, Math.min(MAX_LIMIT, limit ?? DEFAULT_LIMIT));
@@ -61,7 +62,7 @@ export function registerMesh(app: TypeBoxFastifyInstance, c: () => Ctx, auth: Ht
 				before = beforeNum;
 			}
 			const limit = clampedLimit(req.query.limit);
-			const fetchedRows = c().repos.comms.listConversation(a, b, before, (limit + 1) * 3);
+			const fetchedRows = c().repos.comms.listConversation(a, b, before, (limit + 1) * DEDUP_OVERFETCH_FACTOR);
 			const deduped = deduplicateCommRows(fetchedRows);
 			const hasNextPage = deduped.length > limit;
 			const page = deduped.slice(0, limit);
@@ -85,7 +86,7 @@ export function registerMesh(app: TypeBoxFastifyInstance, c: () => Ctx, auth: Ht
 		async (req) => {
 			const agentId = req.params.agentId;
 			const limit = clampedLimit(req.query.limit);
-			const comms = c().repos.comms.listByAgent(agentId, limit * 3);
+			const comms = c().repos.comms.listByAgent(agentId, limit * DEDUP_OVERFETCH_FACTOR);
 			return { items: toCommViews(deduplicateCommRows(comms).slice(0, limit), c) };
 		},
 	);

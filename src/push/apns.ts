@@ -1,6 +1,7 @@
 import { createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { connect } from "node:http2";
+import { MINUTE } from "../util/time.js";
 
 export interface ApnsMessage {
 	host: "api.push.apple.com" | "api.development.push.apple.com";
@@ -60,7 +61,7 @@ export interface ApnsConfig {
 export const APNS_BAD_TOKEN = "Unregistered";
 export const BAD_DEVICE_TOKEN = "BadDeviceToken";
 const APNS_TIMEOUT_MS = 10_000;
-const APNS_IDLE_TIMEOUT_MS = 5 * 60_000;
+const APNS_IDLE_TIMEOUT_MS = 5 * MINUTE;
 
 /** Prefix-truncates at a Unicode code-point boundary, with an absolute 64-byte APNs header limit. */
 export function fitApnsCollapseId(value: string): string {
@@ -86,7 +87,7 @@ export class ApnsError extends Error {
 	}
 }
 
-const APNS_PROVIDER_TOKEN_TTL_MS = 40 * 60_000;
+const APNS_PROVIDER_TOKEN_TTL_MS = 40 * MINUTE;
 
 function providerToken(config: ApnsConfig, privateKey: string, now: number): string {
 	const encode = (value: string | Buffer) => Buffer.from(value).toString("base64url");

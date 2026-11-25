@@ -1,17 +1,8 @@
-import {
-	CloseCode,
-	type Envelope,
-	ErrorCode,
-	errorEnvelope,
-	type MachineQuota,
-	MIN_PROTOCOL_VERSION,
-	PROTOCOL_VERSION,
-	validateMessage,
-} from "@j3pf/rp-protocol";
+import { CloseCode, type Envelope, ErrorCode, errorEnvelope, type MachineQuota } from "@j3pf/rp-protocol";
 import type { WebSocket } from "ws";
 import type { Ctx } from "../context.js";
 import type { MachineRow } from "../db/repos/index.js";
-import { bindWsGateway, type HostConn, startHeartbeat, WsConn } from "./conn.js";
+import { bindWsGateway, type HostConn, startHeartbeat, validateGatewayEnvelope, WsConn } from "./conn.js";
 
 class WsHostConn extends WsConn implements HostConn {
 	ready = false;
@@ -31,20 +22,18 @@ export function handleHostSocket(c: () => Ctx, socket: WebSocket, machine: Machi
 	startHeartbeat(socket);
 
 	const handle = (env: Envelope) => {
-		if (env.v < MIN_PROTOCOL_VERSION || env.v > PROTOCOL_VERSION) {
-			conn.send(errorEnvelope(ErrorCode.BadRequest, "versión de protocolo no soportada", env.id));
-			conn.close(CloseCode.IncompatibleVersion, "incompatible protocol version");
-			return;
-		}
-		if (!conn.ready && env.t !== "host.hello") {
-			conn.send(errorEnvelope(ErrorCode.BadRequest, "el primer mensaje debe ser host.hello", env.id));
-			conn.close(CloseCode.InvalidFrame, "hello required");
-			return;
-		}
-		const v = validateMessage("hostUp", env);
-		if (!v.ok) {
-			conn.send(errorEnvelope(ErrorCode.BadRequest, v.message, env.id));
-			if (env.t === "host.hello") conn.close(CloseCode.InvalidFrame, "invalid hello");
+		if (
+			validateGatewayEnvelope({
+				conn,
+				env,
+				channel: "hostUp",
+				helloType: "host.hello",
+				ready: conn.ready,
+				log,
+				logContext: { machineId: machine.id },
+				logMessage: "host → relay",
+			}) !== "ok"
+		) {
 			return;
 		}
 		if (env.t === "host.hello") {

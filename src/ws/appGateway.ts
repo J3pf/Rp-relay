@@ -14,10 +14,7 @@ import {
 	envelope,
 	errorEnvelope,
 	type MeshSubscribe,
-	MIN_PROTOCOL_VERSION,
-	PROTOCOL_VERSION,
 	type PushAck,
-	validateMessage,
 } from "@j3pf/rp-protocol";
 import type { Static } from "@sinclair/typebox";
 import { ulid } from "ulid";
@@ -25,10 +22,11 @@ import type { WebSocket } from "ws";
 import type { Ctx } from "../context.js";
 import type { DeviceRow } from "../db/repos/index.js";
 import { RelayError } from "../util/errors.js";
-import { type AppConn, bindWsGateway, startHeartbeat, WsConn } from "./conn.js";
+import { MINUTE } from "../util/time.js";
+import { type AppConn, bindWsGateway, startHeartbeat, validateGatewayEnvelope, WsConn } from "./conn.js";
 
-const TOUCH_EVERY_MS = 5 * 60_000;
-const DIRECT_PING_INTERVAL_MS = 240_000;
+const TOUCH_EVERY_MS = 5 * MINUTE;
+const DIRECT_PING_INTERVAL_MS = 4 * MINUTE;
 
 class WsAppConn extends WsConn implements AppConn {
 	readonly id = ulid();
@@ -67,25 +65,19 @@ export class AppSession {
 
 	handle(env: Envelope): void {
 		const { log } = this.c();
-		if (env.v < MIN_PROTOCOL_VERSION || env.v > PROTOCOL_VERSION) {
-			this.conn.send(errorEnvelope(ErrorCode.BadRequest, `versión de protocolo ${env.v} no soportada`, env.id));
-			this.conn.close(CloseCode.IncompatibleVersion, "incompatible protocol version");
+		if (
+			validateGatewayEnvelope({
+				conn: this.conn,
+				env,
+				channel: "appUp",
+				helloType: "app.hello",
+				ready: this.helloDone,
+				log,
+				logContext: { deviceId: this.device.id },
+				logMessage: "app → relay",
+			}) !== "ok"
+		) {
 			return;
-		}
-		if (!this.helloDone && env.t !== "app.hello") {
-			this.conn.send(errorEnvelope(ErrorCode.BadRequest, "el primer mensaje debe ser app.hello", env.id));
-			this.conn.close(CloseCode.InvalidFrame, "hello required");
-			return;
-		}
-		const v = validateMessage("appUp", env);
-		if (!v.ok) {
-			this.conn.send(errorEnvelope(ErrorCode.BadRequest, v.message, env.id));
-			if (env.t === "app.hello") this.conn.close(CloseCode.InvalidFrame, "invalid hello");
-			return;
-		}
-		if (log.isLevelEnabled("trace")) log.trace({ deviceId: this.device.id, t: env.t, d: env.d }, "app → relay");
-		else if (log.isLevelEnabled("debug")) {
-			log.debug({ deviceId: this.device.id, t: env.t, bytes: JSON.stringify(env.d ?? null).length }, "app → relay");
 		}
 		try {
 			this.dispatch(env);
@@ -180,7 +172,7 @@ export class AppSession {
 				if (this.conn.mode === "direct")
 					throw new RelayError("bad_request", "el canal directo no admite suscripciones");
 				const snapshot = ctx.mesh.subscribe(this.conn, d.machineId ?? null);
-				this.conn.send(envelope("mesh.snapshot", snapshot, env.id ? { re: env.id } : {}));
+				this.reply(env, "mesh.snapshot", snapshot);
 				return;
 			}
 			case "mesh.unsubscribe":

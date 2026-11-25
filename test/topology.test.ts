@@ -1,9 +1,9 @@
-import type { SubagentUpdateEvent, TodoTask } from "@j3pf/rp-protocol";
+import { MAX_PREVIEW_CHARS, type SubagentUpdateEvent, type TodoTask, truncatePreview } from "@j3pf/rp-protocol";
 import { describe, expect, it } from "vitest";
 import type { AgentRow } from "../src/db/repos/agents.js";
 import type { CommRow } from "../src/db/repos/comms.js";
 import type { MachineRow } from "../src/db/repos/machines.js";
-import { buildMeshSnapshot } from "../src/domain/mesh/topology.js";
+import { buildMeshSnapshot, commEndpoints, MESH_EDGE_ACTIVE_MS } from "../src/domain/mesh/topology.js";
 
 const now = 1_700_000_000_000;
 
@@ -453,5 +453,35 @@ describe("buildMeshSnapshot", () => {
 			current: "Valid task",
 		});
 		expect(node(result, "a").subagents).toEqual([{ taskId: "ok-task", agent: "worker", status: "done" }]);
+	});
+
+	it("exports MESH_EDGE_ACTIVE_MS and commEndpoints for out/in directions", () => {
+		expect(MESH_EDGE_ACTIVE_MS).toBe(20_000);
+		expect(commEndpoints(comm("a", "b"))).toEqual({ from: "a", to: "b" });
+		expect(commEndpoints(inbound("a", "b"))).toEqual({ from: "a", to: "b" });
+		expect(commEndpoints(comm("a", "b", { peer_agent_id: null }))).toEqual({ from: "a", to: null });
+		expect(commEndpoints(inbound("a", "b", { peer_agent_id: null }))).toEqual({ from: null, to: "b" });
+	});
+
+	it("uses onlineAgentIds as single source of truth for node.online when provided", () => {
+		const a = agent("a", { online: 0 });
+		const b = agent("b", { online: 1 });
+		const withoutLiveSet = snapshot([a, b]);
+		expect(node(withoutLiveSet, "a").online).toBe(false);
+		expect(node(withoutLiveSet, "b").online).toBe(true);
+
+		const withLiveSet = snapshot([a, b], [], { onlineAgentIds: new Set(["a"]) });
+		expect(node(withLiveSet, "a").online).toBe(true);
+		expect(node(withLiveSet, "b").online).toBe(false);
+	});
+
+	it("truncates edge lastPreview consistently with MAX_PREVIEW_CHARS and truncatePreview", () => {
+		const longText = "a".repeat(MAX_PREVIEW_CHARS + 25);
+		const result = snapshot([agent("a"), agent("b")], [comm("a", "b", { text: longText })]);
+		expect(result.edges[0]?.lastPreview).toBe(truncatePreview(longText));
+		expect(result.edges[0]?.lastPreview?.length).toBe(MAX_PREVIEW_CHARS);
+		expect(result.edges[0]?.lastPreview?.endsWith("…")).toBe(true);
+		expect(truncatePreview("short")).toBe("short");
+		expect(truncatePreview("x".repeat(MAX_PREVIEW_CHARS))).toBe("x".repeat(MAX_PREVIEW_CHARS));
 	});
 });

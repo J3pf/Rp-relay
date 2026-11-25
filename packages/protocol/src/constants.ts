@@ -31,8 +31,14 @@ export const ErrorCode = {
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 export const MAX_FRAME_BYTES = 1024 * 1024;
+export const MAX_PREVIEW_CHARS = 140;
 export const PING_INTERVAL_MS = 25_000;
 export const PONG_TIMEOUT_MS = 10_000;
+
+export function truncatePreview(text: string, maxChars = MAX_PREVIEW_CHARS): string {
+	if (text.length <= maxChars) return text;
+	return maxChars <= 1 ? text.slice(0, Math.max(0, maxChars)) : `${text.slice(0, maxChars - 1)}…`;
+}
 
 /** Eventos de Pi que el relay persiste (PROTOCOLO §4, tabla de eventos). */
 export const PERSISTED_EVENT_TYPES = [

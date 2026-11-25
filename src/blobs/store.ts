@@ -8,7 +8,7 @@ import { ulid } from "ulid";
 import type { BlobRow } from "../db/repos/blobs.js";
 import type { Repos } from "../db/repos/index.js";
 import { RelayError } from "../util/errors.js";
-import { DAY } from "../util/time.js";
+import { DAY, HOUR } from "../util/time.js";
 
 export const BLOB_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const SAFE_MIME_RE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/i;
@@ -149,7 +149,7 @@ export class BlobStore {
 			const st = await stat(full).catch(() => null);
 			if (!st) continue;
 			const age = now - st.mtimeMs;
-			if ((f.endsWith(".part") && age > 3_600_000) || (!f.endsWith(".part") && !known.has(id) && age > 3_600_000)) {
+			if ((f.endsWith(".part") && age > HOUR) || (!f.endsWith(".part") && !known.has(id) && age > HOUR)) {
 				await rm(full, { force: true });
 				n++;
 			}

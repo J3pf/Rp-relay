@@ -1,6 +1,9 @@
 import type { Ctx } from "./context.js";
 import { DAY } from "./util/time.js";
 
+const COMMS_RETENTION_DAYS = 7;
+const COMMS_RETENTION_MAX_ROWS = 20_000;
+
 export interface RetentionStats {
 	events: number;
 	agents: number;
@@ -29,7 +32,7 @@ export async function runRetention(c: Ctx, now = Date.now()): Promise<RetentionS
 	const prompts = repos.prompts.purgeClosed(now - L.promptRetentionDays * DAY);
 	const codes = repos.pairing.purge(now - DAY);
 	const outbox = repos.outbox.purge(now);
-	const commsPruned = repos.comms.prune(7, 20_000, now);
+	const commsPruned = repos.comms.prune(COMMS_RETENTION_DAYS, COMMS_RETENTION_MAX_ROWS, now);
 	if (stale.length > 0 || commsPruned > 0 || staleAnswered > 0 || events > 0) {
 		c.mesh.invalidate();
 	}

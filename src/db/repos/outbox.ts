@@ -1,3 +1,4 @@
+import { HOUR } from "../../util/time.js";
 import { type DB, stmt } from "../index.js";
 
 export interface OutboxRow {
@@ -53,6 +54,6 @@ export class OutboxRepo {
 		).all(deviceId, now) as OutboxRow[];
 	}
 	purge(now: number): number {
-		return stmt(this.db, "DELETE FROM push_outbox WHERE expires_at<? OR acked_at<?").run(now, now - 3_600_000).changes;
+		return stmt(this.db, "DELETE FROM push_outbox WHERE expires_at<? OR acked_at<?").run(now, now - HOUR).changes;
 	}
 }

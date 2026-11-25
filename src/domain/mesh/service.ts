@@ -1,13 +1,13 @@
 import { type CommView, envelope, type MeshSnapshot, type SubagentUpdateEvent, type TodoTask } from "@j3pf/rp-protocol";
 import type { Ctx } from "../../context.js";
 import type { CommRow } from "../../db/repos/comms.js";
+import { DAY } from "../../util/time.js";
 import type { AppConn } from "../../ws/conn.js";
 import { agentDisplayName } from "../agentNames.js";
-import { buildMeshSnapshot } from "./topology.js";
+import { buildMeshSnapshot, commEndpoints, MESH_EDGE_ACTIVE_MS } from "./topology.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const UPDATE_INTERVAL_MS = 500;
-const SEEN_TTL_MS = DAY_MS;
+const SEEN_TTL_MS = DAY;
 const MAX_SEEN_MESSAGES = 20_000;
 const MAX_CACHE_ENTRIES = 64;
 
@@ -29,8 +29,7 @@ export function buildCommView(
 		getNode: (agentId: string) => { name?: string | null; groupId?: string | null } | undefined;
 	},
 ): CommView {
-	const senderId = comm.direction === "out" ? comm.agent_id : comm.peer_agent_id;
-	const receiverId = comm.direction === "out" ? comm.peer_agent_id : comm.agent_id;
+	const { from: senderId, to: receiverId } = commEndpoints(comm);
 	const sender = senderId ? deps.getAgent(senderId) : undefined;
 	const receiver = receiverId ? deps.getAgent(receiverId) : undefined;
 	const senderCandidate = sender ?? {
@@ -93,7 +92,7 @@ export class MeshService {
 			this.cache.set(machineId, cachedEntry);
 		}
 		if (!snapshot) {
-			const { repos } = this.c();
+			const { repos, hub } = this.c();
 			const machines = repos.machines.list();
 			const activeMachineIds = new Set(machines.filter((m) => !m.revoked_at).map((m) => m.id));
 			if (machineId !== null && !activeMachineIds.has(machineId)) {
@@ -141,14 +140,15 @@ export class MeshService {
 				}
 			}
 			const openPromptsByAgent: Record<string, number> = Object.create(null);
-			for (const prompt of repos.prompts.list(["open", "answered"])) {
-				openPromptsByAgent[prompt.agent_id] = (openPromptsByAgent[prompt.agent_id] ?? 0) + 1;
+			for (const [agentId, count] of repos.prompts.countOpenByAgent()) {
+				openPromptsByAgent[agentId] = count;
 			}
 			snapshot = buildMeshSnapshot({
 				agents,
 				machines,
-				comms: repos.comms.listSince(now - DAY_MS),
+				comms: repos.comms.listSince(now - DAY),
 				now,
+				onlineAgentIds: new Set(hub.agents.keys()),
 				machineFilter: machineId,
 				openPromptsByAgent,
 				latestTodosByAgent,
@@ -167,7 +167,7 @@ export class MeshService {
 			generatedAt: now,
 			edges: snapshot.edges.map((edge) => ({
 				...edge,
-				active: now - edge.lastAt <= 20_000,
+				active: now - edge.lastAt <= MESH_EDGE_ACTIVE_MS,
 			})),
 		};
 	}
@@ -184,8 +184,7 @@ export class MeshService {
 		const { hub, repos } = this.c();
 		if (!hub.hasMeshSubscribers()) return;
 
-		const senderId = comm.direction === "out" ? comm.agent_id : comm.peer_agent_id;
-		const receiverId = comm.direction === "out" ? comm.peer_agent_id : comm.agent_id;
+		const { from: senderId, to: receiverId } = commEndpoints(comm);
 		if (!senderId || !receiverId) return;
 		const sender = repos.agents.get(senderId);
 		const receiver = repos.agents.get(receiverId);
@@ -258,7 +257,7 @@ export class MeshService {
 		let earliestExpiry = Number.POSITIVE_INFINITY;
 		for (const snapshot of snapshots) {
 			for (const edge of snapshot.edges) {
-				if (edge.active) earliestExpiry = Math.min(earliestExpiry, edge.lastAt + 20_001);
+				if (edge.active) earliestExpiry = Math.min(earliestExpiry, edge.lastAt + MESH_EDGE_ACTIVE_MS + 1);
 			}
 		}
 		if (!Number.isFinite(earliestExpiry)) {
