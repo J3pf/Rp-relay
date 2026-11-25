@@ -32,6 +32,8 @@ const TTL_OTHER = 10 * MINUTE;
 const MAX_BODY_BYTES = 3000;
 const APNS_MAX_BODY_BYTES = 2900;
 const DEFAULT_PUSH_RETRY_DELAY_MS = 100;
+const MAX_TRACKED_PROMPTS = 10_000;
+const PUSH_ID_PLACEHOLDER = "0".repeat(26);
 const FIT_BODY_CLIP_PRIORITY = ["detail", "preview", "agentLabel", "machineContext", "machineName"] as const;
 const FIT_BODY_DROP_PRIORITY = [
 	"detail",
@@ -189,8 +191,7 @@ export function fitBody<T extends Record<string, unknown>>(body: T, maxBytes = M
 	return cloned as T;
 }
 
-export function buildApnsPayload(pushKey: Buffer, kind: PushKindName, body: Record<string, unknown>) {
-	const enc = encryptPush(pushKey, fitBody(body, APNS_MAX_BODY_BYTES));
+function wrapApnsPayload(enc: { n: string; c: string }, kind: PushKindName) {
 	return {
 		aps: {
 			"mutable-content": 1,
@@ -202,10 +203,15 @@ export function buildApnsPayload(pushKey: Buffer, kind: PushKindName, body: Reco
 	};
 }
 
+export function buildApnsPayload(pushKey: Buffer, kind: PushKindName, body: Record<string, unknown>) {
+	return wrapApnsPayload(encryptPush(pushKey, fitBody(body, APNS_MAX_BODY_BYTES)), kind);
+}
+
 export class PushDispatcher {
 	private fcm: FcmSender | null;
 	private apns: ApnsSender | null;
 	private retryDelayMs: number;
+	private deliveredPromptDevices = new Map<string, Set<string>>();
 
 	constructor(
 		private c: () => Ctx,
@@ -229,7 +235,24 @@ export class PushDispatcher {
 		return this.apns !== null;
 	}
 	close(): void {
+		this.deliveredPromptDevices.clear();
 		this.apns?.close?.();
+	}
+
+	private recordPromptDelivery(promptId: string, devices: DeviceRow[]): void {
+		let set = this.deliveredPromptDevices.get(promptId);
+		if (set) {
+			this.deliveredPromptDevices.delete(promptId);
+		} else {
+			set = new Set();
+		}
+		for (const d of devices) set.add(d.id);
+		this.deliveredPromptDevices.set(promptId, set);
+		while (this.deliveredPromptDevices.size > MAX_TRACKED_PROMPTS) {
+			const oldest = this.deliveredPromptDevices.keys().next().value;
+			if (oldest === undefined) break;
+			this.deliveredPromptDevices.delete(oldest);
+		}
 	}
 
 	// ---- eventos de dominio ----
@@ -278,6 +301,14 @@ export class PushDispatcher {
 	promptCancelled(promptId: string, excludeDevice?: string | null): void {
 		const { repos } = this.c();
 		repos.outbox.dropPromptDeliveries(promptId, Date.now());
+		const delivered = this.deliveredPromptDevices.get(promptId);
+		if (delivered) {
+			const targets = excludeDevice ? [...delivered].filter((id) => id !== excludeDevice) : [...delivered];
+			delivered.clear();
+			if (targets.length === 0) return;
+			void this.fanOut("cancel", promptId, { promptId }, null, { only: targets });
+			return;
+		}
 		void this.fanOut("cancel", promptId, { promptId }, null, { exclude: excludeDevice ?? undefined });
 	}
 
@@ -391,19 +422,25 @@ export class PushDispatcher {
 			}
 			eligible.push(d);
 		}
-		return Promise.all(eligible.map((d) => this.deliver(d, kind, ref, body, now)));
+		if (kind === "prompt") this.recordPromptDelivery(ref, eligible);
+		if (eligible.length === 0) return [];
+		const preFitted = fitBody({ ...body, pushId: PUSH_ID_PLACEHOLDER }, MAX_BODY_BYTES);
+		const preFittedApns =
+			this.apns && eligible.some((d) => Boolean(d.apns_token)) ? fitBody(preFitted, APNS_MAX_BODY_BYTES) : null;
+		return Promise.all(eligible.map((d) => this.deliver(d, kind, ref, preFitted, preFittedApns, now)));
 	}
 
 	private async deliver(
 		d: DeviceRow,
 		kind: PushKindName,
 		ref: string,
-		body: Record<string, unknown>,
+		preFitted: Record<string, unknown>,
+		preFittedApns: Record<string, unknown> | null,
 		now: number,
 	): Promise<PushResult> {
 		const { repos, hub } = this.c();
 		const pushId = ulid();
-		const full = fitBody({ ...body, pushId });
+		const full = { ...preFitted, pushId };
 		const res: PushResult = { deviceId: d.id, direct: "off", fcm: "off", apns: "off" };
 		const ttl = kind === "prompt" ? TTL_PROMPT : TTL_OTHER;
 
@@ -461,12 +498,13 @@ export class PushDispatcher {
 			try {
 				const apnsConfig = this.c().config.apns;
 				const environment = d.apns_env ?? apnsConfig?.env ?? "production";
+				const apnsBody = preFittedApns ? { ...preFittedApns, pushId } : full;
 				const apnsMsg = {
 					host: (environment === "sandbox" ? "api.development.push.apple.com" : "api.push.apple.com") as
 						| "api.push.apple.com"
 						| "api.development.push.apple.com",
 					token: apnsToken,
-					payload: buildApnsPayload(d.push_key, kind, full),
+					payload: wrapApnsPayload(encryptPush(d.push_key, apnsBody), kind),
 					headers: {
 						topic: apnsConfig?.bundleId ?? "",
 						collapseId: fitApnsCollapseId(ref),
@@ -498,18 +536,21 @@ export class PushDispatcher {
 	flushDirect(deviceId: string, send: (msg: ReturnType<typeof envelope>) => boolean): number {
 		const { repos } = this.c();
 		const now = Date.now();
-		let n = 0;
-		for (const row of repos.outbox.pendingFor(deviceId, now)) {
+		const pending = repos.outbox.pendingFor(deviceId, now);
+		if (pending.length === 0) return 0;
+		const stalePushIds: string[] = [];
+		const toSend: Array<{ pushId: string; kind: string; body: unknown }> = [];
+		for (const row of pending) {
 			if (row.kind === "prompt" && row.ref_id) {
 				const p = repos.prompts.get(row.ref_id);
 				if (p?.state !== "open") {
-					repos.outbox.ack(row.push_id, deviceId, now);
+					stalePushIds.push(row.push_id);
 					continue;
 				}
 			} else if (row.ref_id) {
 				// settled / error / terminal_wait: el `ref_id` es el agentId, y un agente archivado ya no notifica.
 				if (repos.agents.get(row.ref_id)?.archived_at != null) {
-					repos.outbox.ack(row.push_id, deviceId, now);
+					stalePushIds.push(row.push_id);
 					continue;
 				}
 			}
@@ -517,10 +558,19 @@ export class PushDispatcher {
 			try {
 				parsedBody = JSON.parse(row.body);
 			} catch {
-				repos.outbox.ack(row.push_id, deviceId, now);
+				stalePushIds.push(row.push_id);
 				continue;
 			}
-			if (send(envelope("push.notify", { pushId: row.push_id, k: row.kind, body: parsedBody }))) n++;
+			toSend.push({ pushId: row.push_id, kind: row.kind, body: parsedBody });
+		}
+		if (stalePushIds.length > 0) {
+			repos.db.transaction(() => {
+				for (const pushId of stalePushIds) repos.outbox.ack(pushId, deviceId, now);
+			})();
+		}
+		let n = 0;
+		for (const item of toSend) {
+			if (send(envelope("push.notify", { pushId: item.pushId, k: item.kind, body: item.body }))) n++;
 		}
 		return n;
 	}

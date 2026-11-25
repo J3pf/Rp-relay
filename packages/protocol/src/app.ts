@@ -76,6 +76,8 @@ export const AppHello = Type.Object({
 	app: Type.Object({ version: Type.String() }),
 	subscriptions: Type.Optional(Type.Literal("all")),
 });
+export const AppState = Type.Object({ screenOn: Type.Boolean() });
+export type AppState = Static<typeof AppState>;
 export const AgentSubscribe = Type.Object({
 	agentId: Id,
 	sinceSeq: OptNullable(Type.Integer({ minimum: 0 })),

@@ -24,6 +24,7 @@ import {
 	AppAgentEvent,
 	AppHello,
 	AppPromptAnswer,
+	AppState,
 	AppUserMessage,
 	AppWelcome,
 	MachinesUpdate,
@@ -93,6 +94,7 @@ export const SCHEMAS: Record<Channel, Record<string, TSchema>> = {
 	},
 	appUp: {
 		"app.hello": AppHello,
+		"app.state": AppState,
 		"agent.subscribe": AgentSubscribe,
 		"agent.unsubscribe": AgentRef,
 		"user.message": AppUserMessage,

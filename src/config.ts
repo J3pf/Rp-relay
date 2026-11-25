@@ -20,6 +20,8 @@ const Limits = Type.Object({
 	pairAttemptsPerMinute: Type.Integer({ minimum: 1, default: 5 }),
 	maxWsPerDevice: Type.Integer({ minimum: 1, default: 32 }),
 	maxWsTotal: Type.Integer({ minimum: 1, default: 1024 }),
+	directPingMs: Type.Integer({ minimum: 1000, default: 300_000 }),
+	directPongTimeoutMs: Type.Integer({ minimum: 1000, default: 20_000 }),
 });
 
 const TrustProxySchema = Type.Union([Type.Boolean(), Type.Integer({ minimum: 0 }), Type.String({ minLength: 1 })]);
@@ -108,6 +110,8 @@ function applyEnv(raw: Json, env: NodeJS.ProcessEnv): Json {
 	if (env.RP_TLS_CERT && env.RP_TLS_KEY) c.tls = { cert: env.RP_TLS_CERT, key: env.RP_TLS_KEY };
 	if (env.RP_ACME_DOMAIN && env.RP_ACME_EMAIL)
 		c.tls = { acme: { domain: env.RP_ACME_DOMAIN, email: env.RP_ACME_EMAIL } };
+	c.limits ??= {};
+	if (env.RP_DIRECT_PING_MS) c.limits.directPingMs = Number(env.RP_DIRECT_PING_MS);
 	return c;
 }
 

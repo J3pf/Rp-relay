@@ -1,5 +1,5 @@
 import { CloseCode, type Envelope } from "@j3pf/rp-protocol";
-import type { AgentConn, AppConn, HostConn } from "./conn.js";
+import type { AgentConn, AppConn, AppMode, HostConn } from "./conn.js";
 
 export interface HubLimits {
 	maxBufferedBytes: number;
@@ -111,8 +111,17 @@ export class Hub {
 	appsOfDevice(deviceId: string, mode?: AppConn["mode"]): AppConn[] {
 		return [...this.apps].filter((a) => a.deviceId === deviceId && (!mode || a.mode === mode));
 	}
-	readyApps(mode?: AppConn["mode"]): AppConn[] {
+	readyApps(mode?: AppMode): AppConn[] {
 		return [...this.apps].filter((a) => a.ready && (!mode || a.mode === mode));
+	}
+	hasApps(filter?: { mode?: AppMode; screenOn?: boolean }): boolean {
+		for (const c of this.apps) {
+			if (!c.ready) continue;
+			if (filter?.mode && c.mode !== filter.mode) continue;
+			if (filter?.screenOn !== undefined && (c.screenOn !== false) !== filter.screenOn) continue;
+			return true;
+		}
+		return false;
 	}
 	subscribers(agentId: string): Iterable<AppConn> {
 		return this.subsByAgent.get(agentId) ?? Hub.EMPTY_SUBS;
@@ -138,16 +147,33 @@ export class Hub {
 		return conn.send(env);
 	}
 
+	sendAppSerialized(conn: AppConn, raw: string, droppable = false): boolean {
+		const buffered = conn.bufferedAmount;
+		if (buffered > this.limits.hardBufferedBytes) {
+			conn.close(CloseCode.TryAgainLater, "slow consumer");
+			return false;
+		}
+		if (droppable && buffered > this.limits.maxBufferedBytes) return false;
+		return conn.sendSerialized ? conn.sendSerialized(raw) : false;
+	}
+
 	broadcastApps(
 		env: Envelope,
-		opts: { mode?: AppConn["mode"]; droppable?: boolean; filter?: (c: AppConn) => boolean } = {},
+		opts: { mode?: AppMode; screenOn?: boolean; droppable?: boolean; filter?: (c: AppConn) => boolean } = {},
 	): number {
 		let n = 0;
+		let raw: string | undefined;
 		for (const c of this.apps) {
 			if (!c.ready) continue;
 			if (opts.mode && c.mode !== opts.mode) continue;
+			if (opts.screenOn !== undefined && (c.screenOn !== false) !== opts.screenOn) continue;
 			if (opts.filter && !opts.filter(c)) continue;
-			if (this.sendApp(c, env, opts.droppable)) n++;
+			if (c.sendSerialized) {
+				raw ??= JSON.stringify(env);
+				if (this.sendAppSerialized(c, raw, opts.droppable)) n++;
+			} else if (this.sendApp(c, env, opts.droppable)) {
+				n++;
+			}
 		}
 		return n;
 	}

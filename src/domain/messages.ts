@@ -13,7 +13,7 @@ export interface SendUserMessage {
 	asCommand?: boolean;
 }
 
-const KEEP = 500;
+const KEEP = 100;
 const MAX_DONE_AGENTS = 2_000;
 
 /** Enrutamiento de mensajes de usuario con idempotencia por `clientMsgId` (RESILIENCIA §3.2). */

@@ -34,7 +34,7 @@ export class PromptService {
 		const row = repos.prompts.get(p.promptId)!;
 		this.c().log.info({ promptId: p.promptId, agentId, category: p.category, danger: p.danger }, "prompt abierto");
 		mesh.invalidate();
-		hub.broadcastApps(envelope("prompt.opened", summaries.prompt(row)));
+		hub.broadcastApps(envelope("prompt.opened", summaries.prompt(row)), { mode: "foreground" });
 		dispatcher.promptOpened(row);
 		publisher.agent(agentId);
 		const a = repos.agents.get(agentId);
@@ -141,7 +141,7 @@ export class PromptService {
 		mesh.invalidate();
 		const body: PromptResolved = { promptId: prev.id, by, answer };
 		if (byDeviceId) body.byDeviceId = byDeviceId;
-		hub.broadcastApps(envelope("prompt.resolved", body));
+		hub.broadcastApps(envelope("prompt.resolved", body), { mode: "foreground" });
 		dispatcher.promptCancelled(prev.id, by === "remote" ? byDeviceId : null);
 		publisher.agent(prev.agent_id);
 		const a = repos.agents.get(prev.agent_id);

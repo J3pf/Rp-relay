@@ -134,7 +134,7 @@ export class BlobStore {
 	}
 
 	/** Borra blobs caducados (archivo + fila) y archivos huérfanos o `.part` viejos. */
-	async gc(now = Date.now()): Promise<number> {
+	async gc(now = Date.now(), statFn: (path: string) => Promise<{ mtimeMs: number }> = stat): Promise<number> {
 		let n = 0;
 		for (const b of this.repos.blobs.expired(now)) {
 			await rm(this.path(b.id), { force: true });
@@ -144,12 +144,14 @@ export class BlobStore {
 		const files = await readdir(this.dir);
 		const known = new Set(this.repos.blobs.all().map((b) => b.id));
 		for (const f of files) {
+			const isPart = f.endsWith(".part");
+			const id = isPart ? f.slice(0, -5) : f;
+			if (!isPart && known.has(id)) continue;
 			const full = join(this.dir, f);
-			const id = f.replace(/\.part$/, "");
-			const st = await stat(full).catch(() => null);
+			const st = await statFn(full).catch(() => null);
 			if (!st) continue;
 			const age = now - st.mtimeMs;
-			if ((f.endsWith(".part") && age > HOUR) || (!f.endsWith(".part") && !known.has(id) && age > HOUR)) {
+			if (age > HOUR) {
 				await rm(full, { force: true });
 				n++;
 			}

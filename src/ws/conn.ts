@@ -17,10 +17,13 @@ import { WebSocket } from "ws";
 /** Conexión abstracta: WebSocket real o adaptador long-poll. */
 export interface Conn {
 	send(env: Envelope): boolean;
+	sendSerialized?(raw: string): boolean;
 	close(code: number, reason?: string): void;
 	readonly bufferedAmount: number;
 	readonly closed?: boolean;
 }
+
+export type AppMode = "foreground" | "direct";
 
 export interface AgentConn extends Conn {
 	readonly transport: "ws" | "longpoll";
@@ -36,10 +39,12 @@ export interface AgentConn extends Conn {
 export interface AppConn extends Conn {
 	readonly id: string;
 	readonly deviceId: string;
-	readonly mode: "foreground" | "direct";
+	readonly mode: AppMode;
 	/** `agentId`s a los que está suscrita para eventos en vivo. */
 	readonly subs: Set<string>;
 	ready: boolean;
+	/** Estado de pantalla del dispositivo (por defecto `true` para clientes que no envían `app.state`). */
+	screenOn?: boolean;
 }
 
 export interface HostConn extends Conn {
@@ -62,8 +67,16 @@ export class WsConn implements Conn {
 			this.close(CloseCode.TryAgainLater, "slow consumer");
 			return false;
 		}
+		return this.sendSerialized(JSON.stringify(env));
+	}
+	sendSerialized(raw: string): boolean {
+		if (this.closed || this.socket.readyState !== WebSocket.OPEN) return false;
+		if (this.socket.bufferedAmount > this.hardBufferedBytes) {
+			this.close(CloseCode.TryAgainLater, "slow consumer");
+			return false;
+		}
 		try {
-			this.socket.send(JSON.stringify(env));
+			this.socket.send(raw);
 			return true;
 		} catch {
 			return false;
@@ -107,7 +120,7 @@ export function bindWsGateway(opts: {
 	conn: WsConn;
 	helloTimeoutMs: number;
 	isReady: () => boolean;
-	onEnvelope: (env: Envelope) => void;
+	onEnvelope: (env: Envelope, frameBytes: number) => void;
 	onClose: (code: number) => void;
 	onError: (err: Error) => void;
 }): void {
@@ -123,6 +136,11 @@ export function bindWsGateway(opts: {
 			opts.conn.close(CloseCode.InvalidFrame, "binary frame");
 			return;
 		}
+		const frameBytes = Buffer.isBuffer(data)
+			? data.length
+			: Array.isArray(data)
+				? data.reduce((sum, chunk) => sum + chunk.length, 0)
+				: data.byteLength;
 		const parsed = parseFrame(data as Buffer);
 		if (!parsed.ok) {
 			opts.conn.send(
@@ -131,7 +149,7 @@ export function bindWsGateway(opts: {
 			opts.conn.close(CloseCode.InvalidFrame, parsed.reason);
 			return;
 		}
-		opts.onEnvelope(parsed.env);
+		opts.onEnvelope(parsed.env, frameBytes);
 	});
 	opts.socket.on("close", (code) => {
 		opts.conn.closed = true;
@@ -156,8 +174,9 @@ export function validateGatewayEnvelope(opts: {
 	log: Logger;
 	logContext: Record<string, unknown>;
 	logMessage: string;
+	frameBytes?: number;
 }): GatewayEnvelopeCheck {
-	const { conn, env, channel, helloType, ready, log, logContext, logMessage } = opts;
+	const { conn, env, channel, helloType, ready, log, logContext, logMessage, frameBytes } = opts;
 	if (conn.closed) return "closed";
 	if (env.v < MIN_PROTOCOL_VERSION || env.v > PROTOCOL_VERSION) {
 		conn.send(
@@ -186,27 +205,38 @@ export function validateGatewayEnvelope(opts: {
 	}
 	if (log.isLevelEnabled("trace")) log.trace({ ...logContext, t: env.t, d: env.d }, logMessage);
 	else if (log.isLevelEnabled("debug")) {
-		log.debug({ ...logContext, t: env.t, bytes: JSON.stringify(env.d ?? null).length }, logMessage);
+		log.debug({ ...logContext, t: env.t, bytes: frameBytes ?? JSON.stringify(env.d ?? null).length }, logMessage);
 	}
 	return "ok";
 }
 
-/** Ping WS cada 25 s; si no hay pong en 10 s se termina la conexión (PROTOCOLO §1). */
+/** Ping WS tras inactividad (`pingMs`); omite pings redundantes si hubo tráfico reciente y termina si no hay pong en `pongMs`. */
 export function startHeartbeat(
 	socket: WebSocket,
 	opts: { pingMs?: number; pongMs?: number; onPong?: () => void } = {},
 ): () => void {
 	const pingMs = opts.pingMs ?? PING_INTERVAL_MS;
 	const pongMs = opts.pongMs ?? PONG_TIMEOUT_MS;
+	let lastRxAt = Date.now();
+	let pingTimer: NodeJS.Timeout | undefined;
 	let pongTimer: NodeJS.Timeout | undefined;
-	const onPong = () => {
-		if (pongTimer) clearTimeout(pongTimer);
-		pongTimer = undefined;
-		opts.onPong?.();
+	let stopped = false;
+
+	const schedule = (delayMs: number) => {
+		if (stopped) return;
+		if (pingTimer) clearTimeout(pingTimer);
+		pingTimer = setTimeout(onTick, Math.max(1, delayMs));
+		pingTimer.unref();
 	};
-	socket.on("pong", onPong);
-	const timer = setInterval(() => {
-		if (socket.readyState !== WebSocket.OPEN) return;
+
+	const onTick = () => {
+		pingTimer = undefined;
+		if (stopped || socket.readyState !== WebSocket.OPEN) return;
+		const idleMs = Date.now() - lastRxAt;
+		if (idleMs < pingMs) {
+			schedule(pingMs - idleMs);
+			return;
+		}
 		try {
 			socket.ping();
 		} catch {
@@ -214,12 +244,45 @@ export function startHeartbeat(
 		}
 		pongTimer ??= setTimeout(() => socket.terminate(), pongMs);
 		pongTimer.unref();
-	}, pingMs);
-	timer.unref();
-	const stop = () => {
-		clearInterval(timer);
-		if (pongTimer) clearTimeout(pongTimer);
 	};
+
+	const onPong = () => {
+		lastRxAt = Date.now();
+		if (pongTimer) {
+			clearTimeout(pongTimer);
+			pongTimer = undefined;
+		}
+		opts.onPong?.();
+		schedule(pingMs);
+	};
+
+	const onMessage = () => {
+		lastRxAt = Date.now();
+		if (pongTimer) {
+			clearTimeout(pongTimer);
+			pongTimer = undefined;
+			schedule(pingMs);
+		}
+	};
+
+	const stop = () => {
+		if (stopped) return;
+		stopped = true;
+		if (pingTimer) {
+			clearTimeout(pingTimer);
+			pingTimer = undefined;
+		}
+		if (pongTimer) {
+			clearTimeout(pongTimer);
+			pongTimer = undefined;
+		}
+		socket.off("pong", onPong);
+		socket.off("message", onMessage);
+	};
+
+	socket.on("pong", onPong);
+	socket.on("message", onMessage);
 	socket.once("close", stop);
+	schedule(pingMs);
 	return stop;
 }

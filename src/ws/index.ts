@@ -105,6 +105,7 @@ export function attachWebSockets(server: UpgradeServer, c: () => Ctx): { close()
 			threshold: 1024,
 			serverNoContextTakeover: true,
 			clientNoContextTakeover: true,
+			zlibDeflateOptions: { level: 1 },
 		},
 	});
 

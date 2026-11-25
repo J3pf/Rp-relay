@@ -12,11 +12,11 @@ de `rp-relay/packages/protocol/fixtures/*.json` (tests de contrato en los tres r
 | Canal | URL | Quién | Auth |
 |---|---|---|---|
 | WS agentes | `wss://<relay>/ws/agent` | plugin | Header `Authorization: Bearer <machineToken>` |
-| WS apps | `wss://<relay>/ws/app` | app | Header `Authorization: Bearer <deviceToken>`; query `?mode=foreground|direct` (`direct` = conexión del servicio en segundo plano: sólo recibe `push.*`, `prompt.*`, `agents.update` resumido) |
+| WS apps | `wss://<relay>/ws/app` | app | Header `Authorization: Bearer <deviceToken>`; query `?mode=foreground|direct` (`direct` = conexión del servicio en segundo plano: recibe `push.*` y `agents.update` resumido; `prompt.opened`/`prompt.resolved` sólo se emiten a `foreground`) |
 | HTTP | `https://<relay>/v1/...` | ambos | `Authorization: Bearer <token>` |
 
 - Frames de texto, **un objeto JSON por frame**, UTF‑8, máx. **1 MiB** (los adjuntos van por HTTP, no por WS).
-- Keep‑alive: el relay envía ping WS cada 25 s; si no hay pong en 10 s cierra. Los clientes reconectan con
+- Keep‑alive: el relay envía ping WS tras inactividad (25 s en conexiones activas; 5 min configurable vía `RP_DIRECT_PING_MS` en `mode=direct`) omitiendo pings redundantes si hubo tráfico reciente; si no hay pong en 10 s (20 s en `direct`) cierra. Los clientes reconectan con
   backoff exponencial 1 s → 2 → 4 … máx. 30 s, con jitter ±20 %.
 - Código estándar `1012` (service restart) al actualizar el relay: reconectar de inmediato.
 - Códigos de cierre propios: `4001` token inválido/revocado (no reconectar), `4002` versión de protocolo
@@ -180,6 +180,7 @@ App → Relay:
 | Tipo | Cuerpo | Respuesta |
 |---|---|---|
 | `app.hello` | `{ "deviceId", "app":{"version"}, "subscriptions":"all" }` | `app.welcome { machines:[MachineSummary], agents:[AgentSummary], openPrompts:[Prompt] }` |
+| `app.state` | `{ "screenOn": true \| false }` (opcional, compatible hacia atrás; por defecto `true`. En `mode=direct`, con `screenOn: false` se suprimen actualizaciones cosméticas de progreso (`activeTask`/`lastMessagePreview`) manteniendo las transiciones críticas inmediatas; al pasar de `false` a `true` el relay envía de inmediato un `agents.update` fresco de los agentes activos) | — |
 | `agent.subscribe` | `{ "agentId", "sinceSeq": 120 | null, "epoch": "…" | null }` | `agent.history { agentId, epoch, entries:[…], events:[…], liveFromSeq }` y luego eventos en vivo |
 | `agent.unsubscribe` | `{ "agentId" }` | `ack` (si incluye `id`) |
 | `user.message` | igual que §5 + `agentId` | `user.message.ack` (reenviado del plugin) o `error agent_offline` |

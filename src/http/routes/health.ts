@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Ctx } from "../../context.js";
+import { stmt } from "../../db/index.js";
 import type { TypeBoxFastifyInstance } from "../server.js";
 
 function resolveVersion(): string {
@@ -19,7 +20,7 @@ export function registerHealth(app: TypeBoxFastifyInstance, c: () => Ctx): void 
 	app.get("/healthz", async (_req, reply) => {
 		const uptime = Math.round(process.uptime());
 		try {
-			c().repos.db.prepare("SELECT 1").get();
+			stmt(c().repos.db, "SELECT 1").get();
 			return { ok: true, version: VERSION, uptime };
 		} catch (e) {
 			c().log.warn({ err: e instanceof Error ? e.message : String(e) }, "fallo en comprobación de salud de SQLite");

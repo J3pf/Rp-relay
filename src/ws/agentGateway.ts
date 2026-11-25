@@ -32,7 +32,7 @@ export class AgentSession {
 	}
 
 	/** Procesa un sobre ya parseado. Devuelve false si la sesión ya estaba cerrada. */
-	handle(env: Envelope): boolean {
+	handle(env: Envelope, frameBytes?: number): boolean {
 		const { log } = this.c();
 		const check = validateGatewayEnvelope({
 			conn: this.conn,
@@ -43,6 +43,7 @@ export class AgentSession {
 			log,
 			logContext: { agentId: this.conn.agentId },
 			logMessage: "plugin → relay",
+			frameBytes,
 		});
 		if (check !== "ok") return check === "invalid";
 		try {
@@ -139,8 +140,8 @@ export function handleAgentSocket(c: () => Ctx, socket: WebSocket, machine: Mach
 		conn,
 		helloTimeoutMs: c().config.limits.helloTimeoutMs,
 		isReady: () => session.ready,
-		onEnvelope: (env) => {
-			session.handle(env);
+		onEnvelope: (env, frameBytes) => {
+			session.handle(env, frameBytes);
 		},
 		onClose: () => {
 			session.onClose();
@@ -251,6 +252,7 @@ export class LongPollRegistry {
 	}
 
 	private sweep(): void {
+		if (this.sessions.size === 0) return;
 		const now = Date.now();
 		for (const [id, e] of [...this.sessions]) {
 			if (e.conn.closed || now - e.conn.lastActivity > this.idleMs || now - e.conn.lastPollAt > this.idleMs * 2) {

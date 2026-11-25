@@ -71,7 +71,7 @@ describe("queued prompt answers", () => {
 		relay.relay.ctx.repos.devices.setPush(other.deviceId, "other-fcm-token", true);
 		const agent = await connectAgent(relay, machine, "queued-answer");
 		const { client: otherApp } = await connectApp(relay, other, "direct");
-		await openPrompt(otherApp, agent, "queued-prompt");
+		agent.client.send("prompt.open", promptBody(agent.agentId, { promptId: "queued-prompt" }));
 		await otherApp.next((m) => m.t === "push.notify" && (m.d as any).k === "prompt");
 
 		// The agent goes away before anyone answers, so the answer has to be queued.

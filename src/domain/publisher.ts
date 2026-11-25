@@ -1,11 +1,30 @@
-import { envelope } from "@j3pf/rp-protocol";
+import { type AgentSummary, envelope } from "@j3pf/rp-protocol";
 import type { Ctx } from "../context.js";
+
+const DEFAULT_DIRECT_COSMETIC_MS = 5_000;
+
+export interface PublisherOptions {
+	directCosmeticMs?: number;
+}
 
 /** Difusión de cambios de estado a las apps (machines.update, agents.update, hosts.update). */
 export class Publisher {
-	private lastDirectSignature = new Map<string, string>();
+	private lastDirectCriticalSig = new Map<string, string>();
+	private lastDirectCosmeticSig = new Map<string, string>();
+	private pendingDirectCosmetic = new Map<string, AgentSummary>();
+	private cosmeticTimer: NodeJS.Timeout | undefined;
+	private directCosmeticMs: number;
 
-	constructor(private c: () => Ctx) {}
+	constructor(
+		private c: () => Ctx,
+		opts: PublisherOptions = {},
+	) {
+		this.directCosmeticMs = opts.directCosmeticMs ?? DEFAULT_DIRECT_COSMETIC_MS;
+	}
+
+	setDirectCosmeticMs(ms: number): void {
+		this.directCosmeticMs = Math.max(0, ms);
+	}
 
 	agent(agentId: string): void {
 		const { repos, hub, summaries } = this.c();
@@ -13,38 +32,90 @@ export class Publisher {
 		if (!row || row.archived_at !== null) return;
 		const m = repos.machines.get(row.machine_id);
 		if (m?.revoked_at) return;
-		const s = summaries.agent(row);
+		const s = summaries.agent(row, m);
 		hub.broadcastApps(envelope("agents.update", { upsert: [s], remove: [] }), { mode: "foreground" });
-		// el canal directo recibe actualizaciones cuando cambian estado, tarea activa o metadatos del agente
+
+		if (!hub.hasApps({ mode: "direct" })) {
+			if (this.lastDirectCriticalSig.size > 0 || this.pendingDirectCosmetic.size > 0) {
+				this.clearDirectState();
+			}
+			return;
+		}
+
+		// el canal directo separa transiciones críticas (inmediatas) de progreso cosmético (coalescido y suprimido con pantalla apagada)
 		const isWorking = s.status === "working" || s.status === "compacting";
-		const directSig = JSON.stringify([
-			s.status,
-			s.activeTask,
-			isWorking ? s.lastMessagePreview : null,
-			s.online,
-			s.openPromptCount,
-			s.sessionName,
+		const directPreview = isWorking ? s.lastMessagePreview : null;
+		const directSummary: AgentSummary = { ...s, lastMessagePreview: directPreview };
+
+		const criticalSig = JSON.stringify([s.status, s.online, s.openPromptCount, s.redacted, s.sessionName, s.kind]);
+		const cosmeticSig = JSON.stringify([
+			s.activeTask ?? null,
+			directPreview,
 			s.cwd,
 			s.gitBranch,
 			s.machineName,
 			s.machineContext,
 		]);
-		if (this.lastDirectSignature.get(agentId) !== directSig) {
-			this.lastDirectSignature.set(agentId, directSig);
-			hub.broadcastApps(
-				envelope("agents.update", {
-					upsert: [{ ...s, lastMessagePreview: isWorking ? s.lastMessagePreview : null }],
-					remove: [],
-				}),
-				{
-					mode: "direct",
-				},
-			);
+
+		if (this.lastDirectCriticalSig.get(agentId) !== criticalSig) {
+			this.lastDirectCriticalSig.set(agentId, criticalSig);
+			this.lastDirectCosmeticSig.set(agentId, cosmeticSig);
+			this.pendingDirectCosmetic.delete(agentId);
+			if (this.pendingDirectCosmetic.size === 0 && this.cosmeticTimer) {
+				clearTimeout(this.cosmeticTimer);
+				this.cosmeticTimer = undefined;
+			}
+			hub.broadcastApps(envelope("agents.update", { upsert: [directSummary], remove: [] }), { mode: "direct" });
+			return;
+		}
+
+		if (this.lastDirectCosmeticSig.get(agentId) !== cosmeticSig) {
+			if (!hub.hasApps({ mode: "direct", screenOn: true })) return;
+			this.lastDirectCosmeticSig.set(agentId, cosmeticSig);
+			this.pendingDirectCosmetic.set(agentId, directSummary);
+			if (!this.cosmeticTimer) {
+				this.cosmeticTimer = setTimeout(() => this.flushDirectCosmetic(), this.directCosmeticMs);
+				this.cosmeticTimer.unref();
+			}
 		}
 	}
 
+	flushDirectCosmetic(): void {
+		if (this.cosmeticTimer) {
+			clearTimeout(this.cosmeticTimer);
+			this.cosmeticTimer = undefined;
+		}
+		if (this.pendingDirectCosmetic.size === 0) return;
+		const upsert = [...this.pendingDirectCosmetic.values()];
+		this.pendingDirectCosmetic.clear();
+		this.c().hub.broadcastApps(envelope("agents.update", { upsert, remove: [] }), {
+			mode: "direct",
+			screenOn: true,
+		});
+	}
+
+	private clearDirectState(): void {
+		if (this.cosmeticTimer) {
+			clearTimeout(this.cosmeticTimer);
+			this.cosmeticTimer = undefined;
+		}
+		this.lastDirectCriticalSig.clear();
+		this.lastDirectCosmeticSig.clear();
+		this.pendingDirectCosmetic.clear();
+	}
+
+	stop(): void {
+		this.clearDirectState();
+	}
+
+	dispose(): void {
+		this.stop();
+	}
+
 	agentRemoved(agentId: string): void {
-		this.lastDirectSignature.delete(agentId);
+		this.lastDirectCriticalSig.delete(agentId);
+		this.lastDirectCosmeticSig.delete(agentId);
+		this.pendingDirectCosmetic.delete(agentId);
 		this.c().hub.broadcastApps(envelope("agents.update", { upsert: [], remove: [agentId] }));
 	}
 

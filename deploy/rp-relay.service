@@ -5,11 +5,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# El relay avisa a systemd con sd_notify (vía systemd-notify): READY=1 al escuchar y WATCHDOG=1 cada 10 s.
+# El relay avisa a systemd con sd_notify (vía systemd-notify): READY=1 al escuchar y WATCHDOG=1 periódicamente.
 # Si la base de datos deja de responder el watchdog no se notifica y systemd lo reinicia.
 Type=notify
 NotifyAccess=all
-WatchdogSec=30
+WatchdogSec=60
 User=rp-relay
 Group=rp-relay
 Environment=RP_CONFIG=/etc/rp-relay/config.json

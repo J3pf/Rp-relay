@@ -7,6 +7,7 @@ import {
 	type Answer,
 	type AppHello,
 	type AppPromptAnswer,
+	type AppState,
 	type AppUserMessage,
 	CloseCode,
 	type Envelope,
@@ -26,12 +27,13 @@ import { MINUTE } from "../util/time.js";
 import { type AppConn, bindWsGateway, startHeartbeat, validateGatewayEnvelope, WsConn } from "./conn.js";
 
 const TOUCH_EVERY_MS = 5 * MINUTE;
-const DIRECT_PING_INTERVAL_MS = 4 * MINUTE;
+const DIRECT_PING_INTERVAL_MS = 5 * MINUTE;
 
 class WsAppConn extends WsConn implements AppConn {
 	readonly id = ulid();
 	readonly subs = new Set<string>();
 	ready = false;
+	screenOn = true;
 	constructor(
 		socket: WebSocket,
 		readonly deviceId: string,
@@ -63,7 +65,7 @@ export class AppSession {
 		}
 	}
 
-	handle(env: Envelope): void {
+	handle(env: Envelope, frameBytes?: number): void {
 		const { log } = this.c();
 		if (
 			validateGatewayEnvelope({
@@ -75,6 +77,7 @@ export class AppSession {
 				log,
 				logContext: { deviceId: this.device.id },
 				logMessage: "app → relay",
+				frameBytes,
 			}) !== "ok"
 		) {
 			return;
@@ -143,6 +146,24 @@ export class AppSession {
 					const hostUpdates = summaries.allHosts();
 					if (hostUpdates.length > 0) {
 						this.conn.send(envelope("hosts.update", { upsert: hostUpdates, remove: [] }));
+					}
+				}
+				return;
+			}
+			case "app.state": {
+				const d = env.d as Static<typeof AppState>;
+				const wasOff = this.conn.screenOn === false;
+				this.conn.screenOn = d.screenOn;
+				if (this.conn.mode === "direct" && wasOff && d.screenOn) {
+					const active = summaries
+						.allAgents()
+						.filter((a) => a.online || a.openPromptCount > 0)
+						.map((a) => {
+							const isWorking = a.status === "working" || a.status === "compacting";
+							return { ...a, lastMessagePreview: isWorking ? a.lastMessagePreview : null };
+						});
+					if (active.length > 0) {
+						this.conn.send(envelope("agents.update", { upsert: active, remove: [] }));
 					}
 				}
 				return;
@@ -264,19 +285,24 @@ export function handleAppSocket(
 ): void {
 	const conn = new WsAppConn(socket, device.id, mode, c().config.limits.hardBufferedBytes);
 	const session = new AppSession(c, conn, device);
-	const { hub, log } = c();
+	const { hub, log, config } = c();
 	hub.addApp(conn);
 	log.info({ deviceId: device.id, mode, connId: conn.id }, "app conectada");
 	startHeartbeat(socket, {
-		...(mode === "direct" ? { pingMs: DIRECT_PING_INTERVAL_MS } : {}),
+		...(mode === "direct"
+			? {
+					pingMs: config.limits.directPingMs ?? DIRECT_PING_INTERVAL_MS,
+					pongMs: config.limits.directPongTimeoutMs,
+				}
+			: {}),
 		onPong: () => session.touch(),
 	});
 	bindWsGateway({
 		socket,
 		conn,
-		helloTimeoutMs: c().config.limits.helloTimeoutMs,
+		helloTimeoutMs: config.limits.helloTimeoutMs,
 		isReady: () => session.ready,
-		onEnvelope: (env) => session.handle(env),
+		onEnvelope: (env, frameBytes) => session.handle(env, frameBytes),
 		onClose: (code) => {
 			session.onClose();
 			log.info({ deviceId: device.id, mode, connId: conn.id, code }, "app desconectada");
