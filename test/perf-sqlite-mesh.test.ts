@@ -401,7 +401,7 @@ describe("RLY-PERF-03: MeshService incremental materialization & throttle preser
 			label: "Reviewer",
 			status: "done",
 		});
-		await expect.poll(() => t.relay.ctx.repos.agents.get(agent.agentId)?.last_seq).toBe(3);
+		await expect.poll(() => t.relay.ctx.hub.agents.get(agent.agentId)?.lastSeq).toBe(3);
 
 		// Rebuild snapshot after invalidation -> must NOT query SQLite for todo/subagent events again!
 		t.relay.ctx.mesh.invalidate();
@@ -431,7 +431,7 @@ describe("RLY-PERF-03: MeshService incremental materialization & throttle preser
 			label: "Worker 1",
 			status: "done",
 		});
-		await expect.poll(() => t.relay.ctx.repos.agents.get(agent.agentId)?.last_seq).toBe(4);
+		await expect.poll(() => t.relay.ctx.hub.agents.get(agent.agentId)?.lastSeq).toBe(4);
 		t.relay.ctx.mesh.invalidate();
 		const snap2 = t.relay.ctx.mesh.getSnapshot(null);
 		expect(listByTypesSpy).not.toHaveBeenCalled();

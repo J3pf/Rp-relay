@@ -11,7 +11,7 @@ export interface PublisherOptions {
 export class Publisher {
 	private lastDirectCriticalSig = new Map<string, string>();
 	private lastDirectCosmeticSig = new Map<string, string>();
-	private pendingDirectCosmetic = new Map<string, AgentSummary>();
+	private pendingDirectCosmetic = new Set<string>();
 	private cosmeticTimer: NodeJS.Timeout | undefined;
 	private directCosmeticMs: number;
 
@@ -70,9 +70,18 @@ export class Publisher {
 		}
 
 		if (this.lastDirectCosmeticSig.get(agentId) !== cosmeticSig) {
-			if (!hub.hasApps({ mode: "direct", screenOn: true })) return;
+			if (!hub.hasApps({ mode: "direct", screenOn: true })) {
+				if (this.pendingDirectCosmetic.size > 0 || this.cosmeticTimer) {
+					this.pendingDirectCosmetic.clear();
+					if (this.cosmeticTimer) {
+						clearTimeout(this.cosmeticTimer);
+						this.cosmeticTimer = undefined;
+					}
+				}
+				return;
+			}
 			this.lastDirectCosmeticSig.set(agentId, cosmeticSig);
-			this.pendingDirectCosmetic.set(agentId, directSummary);
+			this.pendingDirectCosmetic.add(agentId);
 			if (!this.cosmeticTimer) {
 				this.cosmeticTimer = setTimeout(() => this.flushDirectCosmetic(), this.directCosmeticMs);
 				this.cosmeticTimer.unref();
@@ -86,9 +95,22 @@ export class Publisher {
 			this.cosmeticTimer = undefined;
 		}
 		if (this.pendingDirectCosmetic.size === 0) return;
-		const upsert = [...this.pendingDirectCosmetic.values()];
+		const dirtyIds = [...this.pendingDirectCosmetic];
 		this.pendingDirectCosmetic.clear();
-		this.c().hub.broadcastApps(envelope("agents.update", { upsert, remove: [] }), {
+		const { repos, hub, summaries } = this.c();
+		if (!hub.hasApps({ mode: "direct", screenOn: true })) return;
+		const upsert: AgentSummary[] = [];
+		for (const id of dirtyIds) {
+			const row = repos.agents.get(id);
+			if (!row || row.archived_at !== null) continue;
+			const m = repos.machines.get(row.machine_id);
+			if (m?.revoked_at) continue;
+			const s = summaries.agent(row, m);
+			const isWorking = s.status === "working" || s.status === "compacting";
+			upsert.push({ ...s, lastMessagePreview: isWorking ? s.lastMessagePreview : null });
+		}
+		if (upsert.length === 0) return;
+		hub.broadcastApps(envelope("agents.update", { upsert, remove: [] }), {
 			mode: "direct",
 			screenOn: true,
 		});

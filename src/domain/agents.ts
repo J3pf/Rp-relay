@@ -21,6 +21,16 @@ import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolutio
 
 const UNRESOLVED_COMM_LIMIT = 500;
 const ACTIVITY_TOUCH_THROTTLE_MS = 15_000;
+const SEQ_PERSIST_THROTTLE_MS = 1_000;
+const IMMEDIATE_SEQ_EVENT_TYPES = new Set([
+	"message_end",
+	"agent_end",
+	"agent_settled",
+	"turn_end",
+	"compaction_end",
+	"error",
+	"comm",
+]);
 const checkCommEvent = TypeCompiler.Compile(CommEvent);
 const ACTIVITY_EVENT_TYPES = new Set([
 	"message_start",
@@ -74,6 +84,7 @@ const modelOf = (m: any): string | null => {
 
 export class AgentService {
 	private graceTimers = new Map<string, NodeJS.Timeout>();
+	private lastSeqWriteAt = new WeakMap<AgentConn, number>();
 
 	constructor(private c: () => Ctx) {}
 
@@ -378,7 +389,15 @@ export class AgentService {
 
 		const out = envelope("agent.event", { agentId, epoch: ev.epoch, seq: ev.seq, e });
 		const droppable = isDroppableEvent(e.type);
-		for (const app of hub.subscribers(agentId)) hub.sendApp(app, out, droppable);
+		let raw: string | undefined;
+		for (const app of hub.subscribers(agentId)) {
+			if (app.sendSerialized) {
+				raw ??= JSON.stringify(out);
+				hub.sendAppSerialized(app, raw, droppable);
+			} else {
+				hub.sendApp(app, out, droppable);
+			}
+		}
 		if (outcome.agentChanged) publisher.agent(agentId);
 	}
 
@@ -392,14 +411,20 @@ export class AgentService {
 		const now = Date.now();
 		const persisted = isPersistedEvent(e.type);
 		const shouldTouch = ACTIVITY_EVENT_TYPES.has(e.type) && now - (conn.lastTouchAt ?? 0) >= ACTIVITY_TOUCH_THROTTLE_MS;
+		const shouldPersistSeq =
+			persisted &&
+			(IMMEDIATE_SEQ_EVENT_TYPES.has(e.type) || now - (this.lastSeqWriteAt.get(conn) ?? 0) >= SEQ_PERSIST_THROTTLE_MS);
 
 		let inserted = true;
 		let outcome: EventProjectionOutcome = { agentChanged: false };
 		const applyDbWrites = () => {
 			if (persisted) {
 				inserted = repos.events.insert(agentId, ev.epoch, ev.seq, now, e.type, e);
-				repos.agents.setSeq(agentId, ev.seq);
 				if (!inserted) return;
+				if (shouldPersistSeq) {
+					this.lastSeqWriteAt.set(conn, now);
+					repos.agents.setSeq(agentId, ev.seq);
+				}
 			}
 			outcome = this.applyEventProjection(conn, agentId, ev.seq, e);
 			if (shouldTouch) {

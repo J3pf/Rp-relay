@@ -334,9 +334,15 @@ export class MeshService {
 			},
 		});
 		const message = envelope("mesh.comm", { comm: commView });
+		let raw: string | undefined;
 		for (const [conn] of subscribers) {
 			if (!conn.ready) continue;
-			hub.sendApp(conn, message, true);
+			if (conn.sendSerialized) {
+				raw ??= JSON.stringify(message);
+				hub.sendAppSerialized(conn, raw, true);
+			} else {
+				hub.sendApp(conn, message, true);
+			}
 		}
 	}
 
@@ -417,16 +423,21 @@ export class MeshService {
 		if (!hub.hasMeshSubscribers()) return;
 		this.lastUpdateAt = Date.now();
 		const subscribers = [...hub.meshSubscribers()];
-		const envelopes = new Map<string | null, Envelope>();
+		const payloads = new Map<string | null, { env: Envelope; raw?: string }>();
 		for (const [conn, machineId] of subscribers) {
 			if (!conn.ready) continue;
 			try {
-				let env = envelopes.get(machineId);
-				if (!env) {
-					env = envelope("mesh.update", this.getSnapshot(machineId));
-					envelopes.set(machineId, env);
+				let entry = payloads.get(machineId);
+				if (!entry) {
+					entry = { env: envelope("mesh.update", this.getSnapshot(machineId)) };
+					payloads.set(machineId, entry);
 				}
-				hub.sendApp(conn, env, true);
+				if (conn.sendSerialized) {
+					entry.raw ??= JSON.stringify(entry.env);
+					hub.sendAppSerialized(conn, entry.raw, true);
+				} else {
+					hub.sendApp(conn, entry.env, true);
+				}
 			} catch (error) {
 				log.warn({ err: (error as Error).message, machineId }, "no se pudo generar la actualización del mesh");
 			}

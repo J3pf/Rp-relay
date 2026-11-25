@@ -547,4 +547,69 @@ describe("Secondary hot-path optimizations (PERF-09 / PERF-10)", () => {
 		expect(r2.status).toBe(200);
 		expect(r1.json.ok).toBe(true);
 	});
+
+	it("direct cosmetic flush never overwrites newer state after screenOn false -> true flap", async () => {
+		const t = await start();
+		t.relay.ctx.publisher.setDirectCosmeticMs(250);
+		const machine = await pairMachine(t);
+		const device = await pairDevice(t);
+		const agent = await connectAgent(t, machine, "flap-agent");
+		const { client: direct } = await connectApp(t, device, "direct");
+
+		// Transition to working (critical -> immediate)
+		agent.client.send("agent.status", { status: "working", detail: "step-1" });
+		await direct.next((m) => m.t === "agents.update" && (m.d as any).upsert?.[0]?.activeTask === "step-1");
+
+		// Queue cosmetic update while screenOn=true
+		agent.client.send("agent.status", { status: "working", detail: "step-2-stale" });
+		await new Promise((r) => setTimeout(r, 40));
+
+		// Screen turns off and newer cosmetic update arrives
+		direct.send("app.state", { screenOn: false });
+		await new Promise((r) => setTimeout(r, 30));
+		agent.client.send("agent.status", { status: "working", detail: "step-3-fresh" });
+		await new Promise((r) => setTimeout(r, 30));
+
+		// Screen wakes back up before the original 250ms coalescing timer would have fired
+		direct.send("app.state", { screenOn: true });
+		const wakeUpdate = await direct.next(
+			(m) => m.t === "agents.update" && (m.d as any).upsert?.[0]?.activeTask === "step-3-fresh",
+		);
+		expect((wakeUpdate.d as any).upsert[0].activeTask).toBe("step-3-fresh");
+
+		// Wait past the original 250ms timer: must NEVER receive stale "step-2-stale"
+		await direct.never((m) => m.t === "agents.update" && (m.d as any).upsert?.[0]?.activeTask === "step-2-stale", 350);
+		direct.close();
+		agent.client.close();
+	});
+
+	it("AgentService throttles agents.setSeq on rapid tool_execution bursts and flushes on disconnect", async () => {
+		const t = await start();
+		const machine = await pairMachine(t);
+		const agent = await connectAgent(t, machine, "seq-burst");
+		const setSeqSpy = vi.spyOn(t.relay.ctx.repos.agents, "setSeq");
+		setSeqSpy.mockClear();
+
+		for (let seq = 1; seq <= 6; seq++) {
+			agent.client.send("agent.event", {
+				epoch: "ep-1",
+				seq,
+				e: { type: "tool_execution_start", toolCallId: `tc-${seq}`, toolName: "bash", args: { cmd: "ls" } },
+			});
+		}
+		// Wait until all 6 events are inserted in events table
+		const deadline = Date.now() + 2_000;
+		while (Date.now() < deadline && t.relay.ctx.repos.events.count(agent.agentId) < 6) {
+			await new Promise((r) => setTimeout(r, 15));
+		}
+		expect(t.relay.ctx.repos.events.count(agent.agentId)).toBe(6);
+		// Throttled: only the first event in the 1s window should have written agents.setSeq
+		expect(setSeqSpy.mock.calls.length).toBeLessThanOrEqual(2);
+
+		// Disconnecting flushes the final seq (6) durably
+		agent.client.close();
+		await agent.client.waitClosed();
+		expect(t.relay.ctx.repos.agents.get(agent.agentId)?.last_seq).toBe(6);
+		setSeqSpy.mockRestore();
+	});
 });
