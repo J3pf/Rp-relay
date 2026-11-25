@@ -69,14 +69,13 @@ export class Summaries {
 	machine(
 		m: MachineRow,
 		counts?: Map<string, { total: number; online: number }>,
-		openByAgent?: Map<string, number>,
+		openByMachine?: Map<string, number>,
 	): MachineSummary {
 		const { repos, hub } = this.c();
 		const cs = counts ?? repos.agents.counts();
-		const ob = openByAgent ?? repos.prompts.countOpenByAgent();
+		const obm = openByMachine ?? repos.prompts.countOpenByMachine();
 		const c = cs.get(m.id) ?? { total: 0, online: 0 };
-		let open = 0;
-		for (const a of repos.agents.byMachine(m.id)) open += ob.get(a.id) ?? 0;
+		const open = obm.get(m.id) ?? 0;
 		const hostOnline = hub.hosts.has(m.id);
 		const agentOnline = hub.agentsOfMachine(m.id).length > 0;
 		const quotas = m.quotas ? parse<MachineQuota[]>(m.quotas) : null;
@@ -165,8 +164,8 @@ export class Summaries {
 	allMachines(): MachineSummary[] {
 		const { repos } = this.c();
 		const counts = repos.agents.counts();
-		const ob = repos.prompts.countOpenByAgent();
-		return repos.machines.list().map((m) => this.machine(m, counts, ob));
+		const openByMachine = repos.prompts.countOpenByMachine();
+		return repos.machines.list().map((m) => this.machine(m, counts, openByMachine));
 	}
 
 	host(m: MachineRow): HostSummary {
@@ -205,22 +204,22 @@ export class Summaries {
 	archived(rows: AgentRow[]): ArchivedAgentSummary[] {
 		const { repos } = this.c();
 		const machines = new Map(repos.machines.list().map((m) => [m.id, m]));
-		return rows.flatMap((a) => {
-			const m = machines.get(a.machine_id);
-			if (!m || a.archived_at === null) return [];
-			return [
-				{
-					agentId: a.id,
-					machineId: a.machine_id,
-					machineName: m.name,
-					sessionName: a.session_name,
-					cwd: a.cwd,
-					archivedAt: a.archived_at,
-					lastSeenAt: a.last_seen_at,
-					lastMessagePreview: a.redacted === 1 ? null : a.last_preview,
-					messageCount: repos.events.count(a.id),
-				},
-			];
+		const validRows = rows.filter((a) => machines.has(a.machine_id) && a.archived_at !== null);
+		if (validRows.length === 0) return [];
+		const eventCounts = repos.events.countsByAgent(validRows.map((a) => a.id));
+		return validRows.map((a) => {
+			const m = machines.get(a.machine_id)!;
+			return {
+				agentId: a.id,
+				machineId: a.machine_id,
+				machineName: m.name,
+				sessionName: a.session_name,
+				cwd: a.cwd,
+				archivedAt: a.archived_at!,
+				lastSeenAt: a.last_seen_at,
+				lastMessagePreview: a.redacted === 1 ? null : a.last_preview,
+				messageCount: eventCounts.get(a.id) ?? 0,
+			};
 		});
 	}
 

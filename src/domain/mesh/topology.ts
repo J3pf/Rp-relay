@@ -58,7 +58,7 @@ function compareRows(a: CommRow, b: CommRow): number {
 	return a.comm_id.localeCompare(b.comm_id);
 }
 
-export function deduplicateCommRows(comms: CommRow[]): CommRow[] {
+function deduplicateCommRowsUnsorted(comms: CommRow[]): CommRow[] {
 	const byMessageId = new Map<string, CommRow[]>();
 	const unique: CommRow[] = [];
 	for (const comm of comms) {
@@ -71,7 +71,7 @@ export function deduplicateCommRows(comms: CommRow[]): CommRow[] {
 		byMessageId.set(comm.message_id, rows);
 	}
 	for (const rows of byMessageId.values()) {
-		const ordered = [...rows].sort(compareRows);
+		const ordered = rows.length === 1 ? rows : [...rows].sort(compareRows);
 		const primary = ordered[0]!;
 		const peerAgentId =
 			primary.peer_agent_id ??
@@ -89,16 +89,21 @@ export function deduplicateCommRows(comms: CommRow[]): CommRow[] {
 			at: Math.min(...ordered.map((row) => row.at)),
 		});
 	}
-	return unique.sort(
+	return unique;
+}
+
+export function deduplicateCommRows(comms: CommRow[]): CommRow[] {
+	return deduplicateCommRowsUnsorted(comms).sort(
 		(a, b) => b.at - a.at || b.comm_id.localeCompare(a.comm_id) || a.agent_id.localeCompare(b.agent_id),
 	);
 }
 
 function deduplicateMessages(comms: CommRow[], agentIds: Set<string>): TopologyMessage[] {
 	const messages: TopologyMessage[] = [];
-	for (const row of deduplicateCommRows(comms)) {
+	for (const row of deduplicateCommRowsUnsorted(comms)) {
 		const ep = commEndpoints(row);
 		if (!ep.from || !ep.to) continue;
+		if (!agentIds.has(ep.from) || !agentIds.has(ep.to) || ep.from === ep.to) continue;
 		messages.push({
 			fromAgentId: ep.from,
 			toAgentId: ep.to,
@@ -111,20 +116,13 @@ function deduplicateMessages(comms: CommRow[], agentIds: Set<string>): TopologyM
 		});
 	}
 
-	return messages
-		.filter(
-			(message) =>
-				agentIds.has(message.fromAgentId) &&
-				agentIds.has(message.toAgentId) &&
-				message.fromAgentId !== message.toAgentId,
-		)
-		.sort(
-			(a, b) =>
-				a.at - b.at ||
-				(a.messageId ?? a.commId).localeCompare(b.messageId ?? b.commId) ||
-				a.fromAgentId.localeCompare(b.fromAgentId) ||
-				a.toAgentId.localeCompare(b.toAgentId),
-		);
+	return messages.sort(
+		(a, b) =>
+			a.at - b.at ||
+			(a.messageId ?? a.commId).localeCompare(b.messageId ?? b.commId) ||
+			a.fromAgentId.localeCompare(b.fromAgentId) ||
+			a.toAgentId.localeCompare(b.toAgentId),
+	);
 }
 
 function orderedPair(first: string, second: string): [string, string] {

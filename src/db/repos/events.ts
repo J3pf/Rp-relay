@@ -44,6 +44,19 @@ export class EventsRepo {
 			) as EventRow[]
 		).reverse();
 	}
+	iterateLatest(agentId: string, epoch: string, afterSeq: number, limit = 5000): IterableIterator<EventRow> {
+		return stmt(
+			this.db,
+			"SELECT * FROM events WHERE agent_id=? AND epoch=? AND seq>? ORDER BY seq DESC LIMIT ?",
+		).iterate(agentId, epoch, afterSeq, limit) as IterableIterator<EventRow>;
+	}
+	latestByType(agentId: string, epoch: string, type: string): EventRow | undefined {
+		return stmt(this.db, "SELECT * FROM events WHERE agent_id=? AND epoch=? AND type=? ORDER BY seq DESC LIMIT 1").get(
+			agentId,
+			epoch,
+			type,
+		) as EventRow | undefined;
+	}
 	listByTypes(agentId: string, epoch: string, types: readonly string[], limit = 1000): EventRow[] {
 		if (types.length === 0) return [];
 		if (
@@ -75,6 +88,20 @@ export class EventsRepo {
 	count(agentId: string): number {
 		return (stmt(this.db, "SELECT COUNT(*) AS n FROM events WHERE agent_id=?").get(agentId) as { n: number }).n;
 	}
+	countsByAgent(agentIds: readonly string[]): Map<string, number> {
+		const counts = new Map<string, number>();
+		if (agentIds.length === 0) return counts;
+		const chunkSize = 500;
+		for (let i = 0; i < agentIds.length; i += chunkSize) {
+			const chunk = agentIds.slice(i, i + chunkSize);
+			const placeholders = chunk.map(() => "?").join(",");
+			const rows = this.db
+				.prepare(`SELECT agent_id, COUNT(*) AS n FROM events WHERE agent_id IN (${placeholders}) GROUP BY agent_id`)
+				.all(...chunk) as { agent_id: string; n: number }[];
+			for (const row of rows) counts.set(row.agent_id, row.n);
+		}
+		return counts;
+	}
 	putSnapshot(agentId: string, epoch: string, seq: number, payload: unknown): void {
 		this.putSnapshotTx ??= this.db.transaction((aid: string, ep: string, s: number, p: string) => {
 			stmt(this.db, "DELETE FROM snapshots WHERE agent_id=? AND epoch<>?").run(aid, ep);
@@ -85,6 +112,14 @@ export class EventsRepo {
 			).run(aid, ep, s, p);
 		});
 		this.putSnapshotTx(agentId, epoch, seq, JSON.stringify(payload));
+	}
+	snapshotMeta(agentId: string, epoch: string): { seq: number; pruned: boolean; truncated: boolean } | null {
+		const r = stmt(
+			this.db,
+			"SELECT seq, json_extract(payload, '$.pruned') AS pruned, json_extract(payload, '$.truncated') AS truncated FROM snapshots WHERE agent_id=? AND epoch=?",
+		).get(agentId, epoch) as { seq: number; pruned: unknown; truncated: unknown } | undefined;
+		if (!r) return null;
+		return { seq: r.seq, pruned: Boolean(r.pruned), truncated: Boolean(r.truncated) };
 	}
 	snapshot(
 		agentId: string,

@@ -7,11 +7,11 @@ import type { FastifyInstance } from "fastify";
 import type { Logger } from "pino";
 import { Authenticator } from "./auth/middleware.js";
 import { PairingService } from "./auth/pairing.js";
-import { backupNow, pruneBackups } from "./backup/index.js";
+import { backupNow, backupNowAsync, pruneBackups, pruneBackupsAsync } from "./backup/index.js";
 import { BlobStore } from "./blobs/store.js";
 import { adminTokenPath, backupsDir, blobsDir, type Config, dbPath } from "./config.js";
 import type { Ctx } from "./context.js";
-import { type DB, openDb } from "./db/index.js";
+import { type DB, openDb, stmt } from "./db/index.js";
 import { migrate } from "./db/migrate.js";
 import { Repos } from "./db/repos/index.js";
 import { AgentService } from "./domain/agents.js";
@@ -263,14 +263,14 @@ export class Relay {
 		first.unref();
 		this.timers.push(first);
 		if (config.backup.enabled) {
-			this.every(config.backup.intervalMinutes * MINUTE, () => {
-				this.backup();
+			this.every(config.backup.intervalMinutes * MINUTE, async () => {
+				await this.backupAsync();
 			});
 		}
 		const wd = watchdogIntervalMs();
 		if (wd) {
 			this.every(wd, () => {
-				this.db.prepare("SELECT 1").get(); // si la DB no responde, no se notifica y systemd reinicia
+				stmt(this.db, "SELECT 1").get(); // si la DB no responde, no se notifica y systemd reinicia
 				sdNotify("WATCHDOG=1");
 			});
 		}
@@ -303,6 +303,14 @@ export class Relay {
 		const dir = backupsDir(this.config);
 		const f = backupNow(this.db, dir);
 		const pruned = pruneBackups(dir, this.config.backup.keepDays);
+		this.log.info({ file: f, pruned }, "copia de seguridad creada");
+		return f;
+	}
+
+	async backupAsync(): Promise<string> {
+		const dir = backupsDir(this.config);
+		const f = await backupNowAsync(this.db, dir);
+		const pruned = await pruneBackupsAsync(dir, this.config.backup.keepDays);
 		this.log.info({ file: f, pruned }, "copia de seguridad creada");
 		return f;
 	}
@@ -349,6 +357,7 @@ export class Relay {
 			});
 			await runStep("agents", () => ctx.agents.dispose());
 			await runStep("messages", () => ctx.messages.dispose());
+			await runStep("publisher", () => ctx.publisher.dispose());
 			await runStep("mesh", () => ctx.mesh.dispose());
 			await runStep("hosts", () => ctx.hosts.dispose());
 			await runStep("dispatcher", () => ctx.dispatcher.close());

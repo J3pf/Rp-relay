@@ -10,6 +10,7 @@ export function openDb(path: string, opts: { readonly?: boolean } = {}): DB {
 	db.pragma("busy_timeout = 5000");
 	if (!opts.readonly) {
 		db.pragma("journal_mode = WAL");
+		db.pragma("journal_size_limit = 67108864");
 		db.pragma("synchronous = NORMAL");
 		db.pragma("temp_store = MEMORY");
 		db.pragma("cache_size = -64000");

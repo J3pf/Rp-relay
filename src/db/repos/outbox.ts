@@ -54,6 +54,10 @@ export class OutboxRepo {
 		).all(deviceId, now) as OutboxRow[];
 	}
 	purge(now: number): number {
-		return stmt(this.db, "DELETE FROM push_outbox WHERE expires_at<? OR acked_at<?").run(now, now - HOUR).changes;
+		const expired = stmt(this.db, "DELETE FROM push_outbox WHERE expires_at<?").run(now).changes;
+		const acked = stmt(this.db, "DELETE FROM push_outbox WHERE acked_at IS NOT NULL AND acked_at<?").run(
+			now - HOUR,
+		).changes;
+		return expired + acked;
 	}
 }

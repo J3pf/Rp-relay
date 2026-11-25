@@ -10,7 +10,7 @@ import {
 	isPersistedEvent,
 	truncatePreview,
 } from "@j3pf/rp-protocol";
-import { Value } from "@sinclair/typebox/value";
+import { TypeCompiler } from "@sinclair/typebox/compiler";
 import type { Ctx } from "../context.js";
 import type { CommRow } from "../db/repos/comms.js";
 import type { AgentRow, MachineRow } from "../db/repos/index.js";
@@ -21,6 +21,7 @@ import { resolvePeerAgentId, resolvePeerAgentIdFromReply } from "./peerResolutio
 
 const UNRESOLVED_COMM_LIMIT = 500;
 const ACTIVITY_TOUCH_THROTTLE_MS = 15_000;
+const checkCommEvent = TypeCompiler.Compile(CommEvent);
 const ACTIVITY_EVENT_TYPES = new Set([
 	"message_start",
 	"message_delta",
@@ -91,6 +92,8 @@ export class AgentService {
 		repos.machines.touch(machine.id, now);
 		const prev = hub.registerAgent(conn as AgentConn & { agentId: string });
 		if (prev) this.c().messages.onAgentDisconnected(h.agentId);
+		if (epochChanged) mesh.clearAgent(h.agentId);
+		else mesh.clearNodeMeta(h.agentId);
 		mesh.invalidate();
 
 		const pendingAnswers = repos.prompts.pendingAnswers(h.agentId).flatMap((p) => {
@@ -200,6 +203,7 @@ export class AgentService {
 		const allAgents = repos.agents.list();
 		const agentsById = new Map(allAgents.map((agent) => [agent.id, agent]));
 		const replyCache = new Map<string, CommRow | undefined>();
+		const updates: { agentId: string; commId: string; peerAgentId: string; shouldRedact: boolean }[] = [];
 		for (const comm of matching) {
 			let peerAgentId = resolvePeerAgentId(
 				comm.agent_id,
@@ -221,15 +225,23 @@ export class AgentService {
 			if (peerAgentId) {
 				const shouldRedact =
 					agentsById.get(peerAgentId)?.redacted === 1 || agentsById.get(comm.agent_id)?.redacted === 1;
-				repos.comms.setPeerAgentId(comm.agent_id, comm.comm_id, peerAgentId, shouldRedact);
+				updates.push({ agentId: comm.agent_id, commId: comm.comm_id, peerAgentId, shouldRedact });
 			}
+		}
+		if (updates.length > 0) {
+			repos.db.transaction(() => {
+				for (const u of updates) {
+					repos.comms.setPeerAgentId(u.agentId, u.commId, u.peerAgentId, u.shouldRedact);
+				}
+			})();
 		}
 	}
 
 	private switchEpoch(conn: AgentConn, epoch: string): void {
 		if (!conn.agentId) return;
-		const { repos } = this.c();
+		const { repos, mesh } = this.c();
 		repos.agents.resetEpoch(conn.agentId, epoch);
+		mesh.clearAgent(conn.agentId);
 		conn.epoch = epoch;
 		conn.lastSeq = 0;
 	}
@@ -244,7 +256,7 @@ export class AgentService {
 
 	private persistCommEvent(conn: AgentConn, agentId: string, seq: number, e: EventPayload): CommRow | undefined {
 		const { repos, log } = this.c();
-		if (!Value.Check(CommEvent, e)) {
+		if (!checkCommEvent.Check(e)) {
 			log.warn({ agentId, seq }, "invalid comm event payload; skipping comm persistence");
 			return undefined;
 		}
@@ -339,6 +351,11 @@ export class AgentService {
 		outcome: EventProjectionOutcome,
 	): void {
 		const { repos, hub, dispatcher, publisher, mesh } = this.c();
+		if (e.type === "todo_update" || e.type === "subagent_update") {
+			mesh.onEvent(agentId, ev.epoch, e);
+		} else if (e.type === "session_info_changed") {
+			mesh.clearNodeMeta(agentId);
+		}
 		if (outcome.storedComm) {
 			mesh.invalidate();
 			mesh.onComm(outcome.storedComm);
@@ -533,6 +550,7 @@ export class AgentService {
 		hub.clearAgentSubscribers(agentId);
 		repos.agents.delete(agentId);
 		messages.forget(agentId);
+		mesh.clearAgent(agentId);
 		mesh.invalidate();
 	}
 
@@ -549,6 +567,7 @@ export class AgentService {
 		messages.forget(agentId);
 		this.clearGrace(agentId);
 		prompts.cancelOpenOfAgent(agentId, ["open", "answered"]);
+		mesh.clearAgent(agentId);
 		mesh.invalidate();
 		publisher.agentRemoved(agentId);
 		publisher.machine(a.machine_id);

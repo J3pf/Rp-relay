@@ -1,4 +1,5 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { chmod, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import type { DB } from "../db/index.js";
@@ -30,6 +31,42 @@ export function backupNow(db: DB, dir: string, at = new Date()): string {
 	return target;
 }
 
+/** Non-blocking hot SQLite backup using better-sqlite3's incremental async `db.backup()` API. */
+export async function backupNowAsync(db: DB, dir: string, at = new Date()): Promise<string> {
+	await mkdir(dir, { recursive: true, mode: 0o700 });
+	let target = join(dir, `rp-${stamp(at)}.db`);
+	let n = 1;
+	while (existsSync(target)) target = join(dir, `rp-${stamp(at)}-${n++}.db`);
+	const tmp = `${target}.tmp-${process.pid}`;
+	await rm(tmp, { force: true });
+	await rm(`${tmp}-wal`, { force: true });
+	await rm(`${tmp}-shm`, { force: true });
+	try {
+		await db.backup(tmp);
+		// Normalize copied WAL header to rollback mode so the backup is standalone (no -wal/-shm sidecars on verify/restore).
+		const snapDb = new Database(tmp);
+		try {
+			snapDb.pragma("journal_mode = DELETE");
+		} finally {
+			snapDb.close();
+		}
+		await rm(`${tmp}-wal`, { force: true });
+		await rm(`${tmp}-shm`, { force: true });
+		try {
+			await chmod(tmp, 0o600);
+		} catch {
+			// non-POSIX filesystems
+		}
+		await rename(tmp, target);
+	} catch (e) {
+		await rm(tmp, { force: true }).catch(() => {});
+		await rm(`${tmp}-wal`, { force: true }).catch(() => {});
+		await rm(`${tmp}-shm`, { force: true }).catch(() => {});
+		throw e;
+	}
+	return target;
+}
+
 export function listBackups(dir: string): { file: string; path: string; mtimeMs: number; size: number }[] {
 	if (!existsSync(dir)) return [];
 	return readdirSync(dir)
@@ -55,6 +92,44 @@ export function pruneBackups(dir: string, keepDays: number, now = Date.now()): n
 		if (b.path === protectedPath) continue;
 		if (now - b.mtimeMs > keepDays * DAY) {
 			rmSync(b.path, { force: true });
+			n++;
+		}
+	}
+	return n;
+}
+
+export async function pruneBackupsAsync(dir: string, keepDays: number, now = Date.now()): Promise<number> {
+	let entries: string[];
+	try {
+		entries = await readdir(dir);
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ENOENT") return 0;
+		throw e;
+	}
+	const backups: { file: string; path: string; mtimeMs: number; size: number }[] = [];
+	for (const f of entries) {
+		if (!/^rp-.*\.db$/.test(f)) continue;
+		const path = join(dir, f);
+		try {
+			const st = await stat(path);
+			backups.push({ file: f, path, mtimeMs: st.mtimeMs, size: st.size });
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+			throw e;
+		}
+	}
+	backups.sort((a, b) => b.mtimeMs - a.mtimeMs);
+	if (backups.length <= 1) return 0;
+	let protectedPath = backups[0]!.path;
+	if (backups.every((b) => now - b.mtimeMs > keepDays * DAY)) {
+		const newestValid = backups.find((b) => verifyDb(b.path).ok);
+		if (newestValid) protectedPath = newestValid.path;
+	}
+	let n = 0;
+	for (const b of backups) {
+		if (b.path === protectedPath) continue;
+		if (now - b.mtimeMs > keepDays * DAY) {
+			await rm(b.path, { force: true });
 			n++;
 		}
 	}

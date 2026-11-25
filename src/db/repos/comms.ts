@@ -51,7 +51,7 @@ export class CommsRepo {
 
 	upsert(comm: CommInput): CommRow {
 		const now = Date.now();
-		stmt(
+		return stmt(
 			this.db,
 			`INSERT INTO comms(
 				agent_id, comm_id, machine_id, direction, channel, action,
@@ -74,8 +74,9 @@ export class CommsRepo {
 				peer_agent_id=COALESCE(comms.peer_agent_id, excluded.peer_agent_id),
 				reply_to=COALESCE(comms.reply_to, excluded.reply_to),
 				text=COALESCE(comms.text, excluded.text),
-				updated_at=excluded.updated_at`,
-		).run({
+				updated_at=excluded.updated_at
+			RETURNING *`,
+		).get({
 			agent_id: comm.agent_id,
 			comm_id: comm.comm_id,
 			machine_id: comm.machine_id,
@@ -95,8 +96,7 @@ export class CommsRepo {
 			delivered: typeof comm.delivered === "boolean" ? Number(comm.delivered) : comm.delivered,
 			at: comm.at,
 			now,
-		});
-		return this.get(comm.agent_id, comm.comm_id)!;
+		}) as CommRow;
 	}
 
 	get(agentId: string, commId: string): CommRow | undefined {

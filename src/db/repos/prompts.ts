@@ -135,6 +135,22 @@ export class PromptsRepo {
 			m.set(r.agent_id, r.n);
 		return m;
 	}
+	countOpenByMachine(): Map<string, number> {
+		const m = new Map<string, number>();
+		for (const r of stmt(
+			this.db,
+			`SELECT a.machine_id, COUNT(*) AS n
+			 FROM prompts p
+			 JOIN agents a ON a.id = p.agent_id
+			 WHERE p.state IN ('open','answered') AND a.archived_at IS NULL
+			 GROUP BY a.machine_id`,
+		).all() as {
+			machine_id: string;
+			n: number;
+		}[])
+			m.set(r.machine_id, r.n);
+		return m;
+	}
 	/** 'answered' sin entregar durante más de un día se da por expirado. */
 	expireStaleAnswered(before: number): PromptRow[] {
 		const rows = stmt(this.db, "SELECT * FROM prompts WHERE state='answered' AND answered_at<?").all(
