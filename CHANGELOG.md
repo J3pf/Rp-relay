@@ -7,6 +7,15 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-25
+
+### Rendimiento y Batería
+- **Coalescencia en canal directo y `app.state`**: Agrupa ráfagas cosméticas por agente cuando la pantalla móvil está apagada (`app.state`), evita enviar `prompt.opened` redundantes al socket directo cuando ya se empuja por canal dedicado, y alinea el cadencia de heartbeats para reducir despertares de radio móvil.
+- **Malla incremental, historial en streaming, backups asíncronos e índices SQLite**: `MeshService` pre-serializa y emite deltas incrementales, el historial de eventos transmite en streaming acotado, `backup` usa SQLite asíncrono sin bloquear el event loop, `AgentService` limita escrituras redundantes de `setSeq` (con flush inmediato en `agent_settled`) y se añadieron índices compuestos en SQLite.
+
+### Seguridad y Estabilidad (4R)
+- **Hardening HTTP/WS, almacenamiento, TLS y pushes**: Validación estricta de upgrade WS, resolución de proxy IP y backpressure, aborto limpio en long-poll, limpieza de fugas de redacción y huecos de historial, backups/ACME atómicos con cuota de blobs, endurecimiento del ciclo de vida de streams APNs y descomposición modular de hot paths.
+
 ## [0.8.2] - 2026-11-14
 
 ### Añadido / Seguridad y Privacidad
