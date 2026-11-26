@@ -56,6 +56,7 @@ export async function buildHttp(o: BuildHttpOptions): Promise<TypeBoxFastifyInst
 		loggerInstance: log as FastifyBaseLogger,
 		trustProxy: fastifyTrustProxy,
 		bodyLimit: 2 * 1024 * 1024,
+		forceCloseConnections: true,
 		logController: new LogController({ disableRequestLogging: true }),
 		...(o.https ? { https: o.https } : {}),
 	}).withTypeProvider<TypeBoxTypeProvider>();

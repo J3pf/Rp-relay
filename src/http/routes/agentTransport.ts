@@ -50,6 +50,11 @@ export function registerAgentTransport(
 		} finally {
 			reply.raw.off("close", onClose);
 		}
+		if (ac.signal.aborted || reply.raw.destroyed) {
+			reply.hijack();
+			if (!reply.raw.destroyed) reply.raw.destroy();
+			return;
+		}
 		if ("closed" in r) {
 			registry.drop(p.agentId, entry);
 			return reply
