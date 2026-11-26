@@ -7,6 +7,11 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-25
+
+### Corregido
+- **Cierre ordenado HTTP y long-poll abortado (Node 22+)**: Activa `forceCloseConnections: true` en Fastify para cerrar conexiones HTTP residuales durante `Relay.stop()` / `SIGTERM` y usa `reply.hijack()` + `reply.raw.destroy()` cuando un cliente long-poll desconecta a mitad de `POST /v1/agent/poll`, evitando respuestas fantasma y bloqueos de 30s al apagar.
+
 ## [0.8.3] - 2026-11-25
 
 ### Rendimiento y Batería
