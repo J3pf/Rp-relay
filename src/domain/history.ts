@@ -27,16 +27,15 @@ export class HistoryService {
 		const limit = config.limits.eventsPerAgent;
 
 		const snapPruned = Boolean(snapMeta?.pruned);
+		const latestSeq = Math.max(a.last_seq, hub.agents.get(agentId)?.lastSeq ?? 0);
+		const coversSnapshot = snapMeta === null || sinceSeq === null || sinceSeq >= snapMeta.seq;
 		const canResume =
 			sinceSeq !== null &&
 			epoch === cur &&
+			coversSnapshot &&
 			((first !== null && sinceSeq >= first - 1 && (!snapPruned || sinceSeq >= first)) ||
-				(first === null &&
-					snapMeta !== null &&
-					!snapPruned &&
-					sinceSeq >= snapMeta.seq &&
-					a.last_seq <= snapMeta.seq) ||
-				sinceSeq >= a.last_seq);
+				(first === null && snapMeta !== null && !snapPruned && sinceSeq >= snapMeta.seq && latestSeq <= snapMeta.seq) ||
+				sinceSeq >= latestSeq);
 		const from = canResume ? sinceSeq! : snapMeta ? snapMeta.seq : 0;
 
 		const keptDesc: EventRow[] = [];

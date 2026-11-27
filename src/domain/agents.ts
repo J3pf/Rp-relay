@@ -145,7 +145,7 @@ export class AgentService {
 	}
 
 	onSnapshot(conn: AgentConn, s: AgentSnapshot): void {
-		const { repos, hub, publisher, mesh } = this.c();
+		const { repos, hub, publisher, mesh, history } = this.c();
 		if (!conn.agentId || hub.agents.get(conn.agentId) !== conn) return;
 		if (s.epoch !== conn.epoch) this.switchEpoch(conn, s.epoch);
 		repos.events.putSnapshot(conn.agentId, s.epoch, s.seq, { entries: s.entries, truncated: s.truncated ?? false });
@@ -173,6 +173,20 @@ export class AgentService {
 			repos.agents.setPreview(conn.agentId, latestPreview);
 		}
 		mesh.invalidate();
+		let snapshotHistoryRaw: string | undefined;
+		let snapshotHistoryEnv: ReturnType<typeof envelope> | undefined;
+		for (const app of hub.subscribers(conn.agentId)) {
+			if (!snapshotHistoryEnv) {
+				const { needsResync: _nr, ...body } = history.build(conn.agentId, null, null);
+				snapshotHistoryEnv = envelope("agent.history", body);
+			}
+			if (app.sendSerialized) {
+				snapshotHistoryRaw ??= JSON.stringify(snapshotHistoryEnv);
+				hub.sendAppSerialized(app, snapshotHistoryRaw, false);
+			} else {
+				hub.sendApp(app, snapshotHistoryEnv, false);
+			}
+		}
 		// los suscriptores que esperaban un historial sin snapshot pueden pedirlo de nuevo; avisamos con agents.update
 		publisher.agent(conn.agentId);
 	}
