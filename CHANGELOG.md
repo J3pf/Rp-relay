@@ -7,6 +7,12 @@ y el proyecto se adhiere a [Semantic Versioning](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-11-26
+
+### Corregido
+- **Reanudación de historial tras snapshots de reconexión (`HistoryService.build`)**: Exige `sinceSeq >= snapMeta.seq` y compara contra el `latestSeq` en vivo (`hub` + SQLite) antes de permitir `canResume`, evitando omitir mensajes contenidos en snapshots nuevos enviados después de cortes WebSocket.
+- **Actualización en vivo de chats abiertos al recibir `agent.snapshot` (`AgentService.onSnapshot`)**: Empuja `agent.history` a los suscriptores activos (`hub.subscribers(agentId)`) cuando llega un nuevo snapshot, manteniendo el chat sincronizado con la vista previa del Home.
+
 ## [0.8.4] - 2026-11-25
 
 ### Corregido
